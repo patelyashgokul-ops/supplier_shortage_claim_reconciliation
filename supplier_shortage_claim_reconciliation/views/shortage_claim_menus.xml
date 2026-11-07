@@ -1,0 +1,5 @@
+<odoo>
+    <menuitem id="menu_recovery_root" name="Supplier Recovery" sequence="45" groups="group_warehouse_user,group_claim_user,group_accounts_reviewer,group_module_admin"/>
+    <menuitem id="menu_claims" name="Claims" parent="menu_recovery_root" sequence="10"/>
+    <menuitem id="menu_shortage_claims" name="Shortage Claims" parent="menu_claims" action="action_claim" sequence="10"/>
+</odoo>

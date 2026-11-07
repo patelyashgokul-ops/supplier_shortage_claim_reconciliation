@@ -1,0 +1,70 @@
+<odoo>
+    <record id="view_bill_evidence_list" model="ir.ui.view">
+        <field name="name">account.move.line.supplier.billing.evidence.list</field><field name="model">account.move.line</field><field name="priority">99</field>
+        <field name="arch" type="xml"><list create="0" edit="0" delete="0">
+            <field name="move_id"/><field name="invoice_date"/><field name="date" optional="hide"/><field name="parent_state" widget="badge"/><field name="move_type"/>
+            <field name="purchase_line_id"/><field name="product_id"/><field name="quantity"/><field name="product_uom_id"/>
+            <field name="price_unit"/><field name="discount" optional="hide"/><field name="price_subtotal"/><field name="price_total" optional="hide"/>
+            <field name="tax_ids" widget="many2many_tags" optional="hide"/><field name="currency_id"/><field name="company_id" groups="base.group_multi_company"/>
+        </list></field>
+    </record>
+    <record id="view_bill_evidence_form" model="ir.ui.view">
+        <field name="name">account.move.line.supplier.billing.evidence.form</field><field name="model">account.move.line</field><field name="priority">99</field>
+        <field name="arch" type="xml"><form create="0" edit="0" delete="0">
+            <header><button name="action_ssc_open_vendor_document" type="object" string="Open Vendor Document"/></header>
+            <sheet><group><group><field name="move_id"/><field name="partner_id"/><field name="purchase_line_id"/><field name="product_id"/>
+                <field name="move_type"/><field name="parent_state"/></group><group><field name="invoice_date"/><field name="date"/><field name="company_id"/><field name="currency_id"/></group></group>
+                <group string="Native Billing Source"><field name="quantity"/><field name="product_uom_id"/><field name="price_unit"/><field name="discount"/>
+                <field name="price_subtotal"/><field name="price_total"/><field name="tax_ids" widget="many2many_tags"/></group>
+                <div class="alert alert-info" role="status">Authoritative accounting source amounts. Credit issuance is not cash recovery or a shortage settlement allocation.</div>
+            </sheet>
+        </form></field>
+    </record>
+    <record id="view_claim_billing_form" model="ir.ui.view">
+        <field name="name">supplier.shortage.claim.billing.form</field><field name="model">supplier.shortage.claim</field><field name="inherit_id" ref="view_claim_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//header" position="inside"><button name="action_view_vendor_bills" type="object" string="View Vendor Documents" invisible="not purchase_id or not billing_accessible"/>
+                <button name="action_refresh_billing_review" type="object" string="Refresh Billing Review" groups="group_claim_user,group_accounts_reviewer" invisible="not purchase_id"/></xpath>
+            <xpath expr="//notebook" position="inside"><page string="Vendor Bill Reconciliation">
+                <div class="alert alert-info" role="status">POTENTIAL DIFFERENCE - NOT CONFIRMED CLAIM. Physical receipts, vendor billing and supplier claims are distinct. Draft bills are not posted exposure; credits remain separate without recovery allocation.</div>
+                <field name="billing_accessible" invisible="True"/>
+                <div class="alert alert-warning" role="status" invisible="not billing_review_warning"><field name="billing_review_warning" nolabel="1"/></div>
+                <group invisible="not billing_accessible"><field name="billing_document_count"/><field name="billing_exception_count"/></group>
+                <field name="billing_summary" nolabel="1"/>
+                <p class="text-muted">40-line preview in purchase UoM. Native line amounts retain their original currencies; no cross-currency monetary total is calculated.</p>
+                <button name="action_view_bill_evidence" type="object" string="Open Billing Evidence" invisible="not billing_accessible"/>
+                <button name="action_view_billing_exceptions" type="object" string="Open Billing Exceptions"/>
+                <field name="billing_line_preview_ids" readonly="1" invisible="not billing_accessible" context="{'form_view_ref':'supplier_shortage_claim_reconciliation.view_bill_evidence_form'}">
+                    <list create="0" edit="0" delete="0"><field name="move_id"/><field name="move_type"/><field name="parent_state" widget="badge"/><field name="invoice_date"/>
+                    <field name="purchase_line_id"/><field name="product_id"/><field name="quantity"/><field name="product_uom_id"/><field name="price_subtotal"/><field name="currency_id"/></list>
+                </field>
+            </page></xpath>
+            <xpath expr="//field[@name='claim_line_ids']/form" position="inside"><group string="Vendor Billing Quantities (Purchase UoM)">
+                <field name="billing_complete" invisible="True"/><field name="billing_difference_known" invisible="True"/><field name="billing_policy"/><field name="billing_note"/>
+                <field name="draft_billed_qty" invisible="not billing_complete"/><field name="posted_billed_qty" invisible="not billing_complete"/><field name="canceled_billed_qty" invisible="not billing_complete"/>
+                <field name="draft_credit_qty" invisible="not billing_complete"/><field name="posted_credit_qty" invisible="not billing_complete"/><field name="canceled_credit_qty" invisible="not billing_complete"/>
+                <field name="potential_billed_difference_qty" invisible="not billing_difference_known"/>
+            </group></xpath>
+        </field>
+    </record>
+    <record id="view_exception_billing_form" model="ir.ui.view">
+        <field name="name">supplier.shortage.exception.billing.form</field><field name="model">supplier.shortage.receipt.exception</field><field name="inherit_id" ref="view_receiving_exception_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//header" position="inside"><field name="reconciliation_kind" invisible="True"/><button name="action_open_billing_sources" type="object" string="Open Billing Sources" invisible="reconciliation_kind != 'billing'"/></xpath>
+            <xpath expr="//button[@name='action_open_sources']" position="attributes"><attribute name="invisible">reconciliation_kind == 'billing'</attribute></xpath>
+            <xpath expr="//button[@name='action_start_review']" position="attributes"><attribute name="groups">supplier_shortage_claim_reconciliation.group_claim_user,supplier_shortage_claim_reconciliation.group_warehouse_user,supplier_shortage_claim_reconciliation.group_accounts_reviewer</attribute></xpath>
+            <xpath expr="//button[@name='action_resolve']" position="attributes"><attribute name="groups">supplier_shortage_claim_reconciliation.group_claim_manager,supplier_shortage_claim_reconciliation.group_finance_manager</attribute><attribute name="invisible">not can_manage_review or review_state not in ['new','in_review']</attribute></xpath>
+            <xpath expr="//button[@name='action_dismiss']" position="attributes"><attribute name="groups">supplier_shortage_claim_reconciliation.group_claim_manager,supplier_shortage_claim_reconciliation.group_finance_manager</attribute><attribute name="invisible">not can_manage_review or review_state not in ['new','in_review']</attribute></xpath>
+            <xpath expr="//button[@name='action_reopen']" position="attributes"><attribute name="groups">supplier_shortage_claim_reconciliation.group_claim_manager,supplier_shortage_claim_reconciliation.group_finance_manager</attribute><attribute name="invisible">not can_manage_review or review_state not in ['resolved','dismissed']</attribute></xpath>
+            <xpath expr="//field[@name='assigned_user_id']" position="attributes"><attribute name="groups"/><attribute name="readonly">not can_manage_review or review_state not in ['new','in_review']</attribute></xpath>
+            <xpath expr="//sheet/div[@role='status']" position="replace"><div class="alert alert-info" role="status">Source reconciliation review only. Resolution does not modify Inventory or Accounting and does not approve a financial supplier claim.</div></xpath>
+        </field>
+    </record>
+    <record id="action_receiving_exceptions" model="ir.actions.act_window"><field name="domain">[('reconciliation_kind','=','receiving')]</field></record>
+    <record id="action_billing_exceptions" model="ir.actions.act_window">
+        <field name="name">Billing Exceptions</field><field name="res_model">supplier.shortage.receipt.exception</field><field name="view_mode">list,form</field>
+        <field name="domain">[('reconciliation_kind','=','billing')]</field><field name="context">{'search_default_present':1}</field>
+    </record>
+    <menuitem id="menu_billing_reconciliation" name="Vendor Billing" parent="menu_recovery_root" sequence="30" groups="group_claim_user,group_accounts_reviewer,group_module_admin"/>
+    <menuitem id="menu_billing_exceptions" name="Billing Exceptions" parent="menu_billing_reconciliation" action="action_billing_exceptions" sequence="10"/>
+</odoo>

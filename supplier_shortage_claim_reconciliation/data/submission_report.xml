@@ -1,0 +1,77 @@
+<odoo>
+  <record id="paperformat_supplier_claim" model="report.paperformat">
+    <field name="name">Supplier Claim A4</field><field name="format">A4</field><field name="orientation">Portrait</field>
+    <field name="margin_top">12</field><field name="margin_bottom">20</field><field name="margin_left">12</field><field name="margin_right">12</field>
+    <field name="header_line" eval="False"/><field name="header_spacing">0</field><field name="dpi">96</field>
+  </record>
+  <template id="report_frozen_minimal_layout">
+    <html><head><meta charset="utf-8"/><script type="text/javascript">
+      function sscReportPageNumbers() {
+        var values = {}, parts = window.location.search.substring(1).split('&amp;');
+        for (var i = 0; i &lt; parts.length; i++) {
+          var pair = parts[i].split('='); values[pair[0]] = decodeURIComponent(pair[1] || '');
+        }
+        var names = ['page', 'topage'];
+        for (var j = 0; j &lt; names.length; j++) {
+          var nodes = document.getElementsByClassName(names[j]);
+          for (var k = 0; k &lt; nodes.length; k++) { nodes[k].textContent = values[names[j]] || ''; }
+        }
+      }
+    </script></head><body onload="sscReportPageNumbers()" style="margin:0;padding:0;"><t t-out="body"/></body></html>
+  </template>
+  <record id="report_supplier_claim_statement" model="ir.actions.report">
+    <field name="name">Supplier Shortage Claim Statement</field><field name="model">supplier.shortage.claim.submission</field>
+    <field name="report_type">qweb-pdf-wkhtmltopdf</field><field name="report_name">supplier_shortage_claim_reconciliation.report_claim_statement_document</field>
+    <field name="paperformat_id" ref="paperformat_supplier_claim"/><field name="binding_model_id" ref="model_supplier_shortage_claim_submission"/>
+    <field name="print_report_name">object.name.replace('/', '_')</field>
+  </record>
+  <template id="report_claim_statement_document">
+    <html><head><meta charset="utf-8"/></head><body><main>
+      <t t-foreach="docs" t-as="o"><t t-set="s" t-value="o.external_snapshot"/>
+        <div class="article" t-att-data-oe-model="o._name" t-att-data-oe-id="o.id" t-att-data-oe-lang="o.env.lang">
+          <style>
+            .ssc-statement{font-family:Arial,sans-serif;font-size:13px;color:#24354b;line-height:1.45;}
+            .ssc-statement h1{font-size:25px;color:#142b48;margin:0 0 7px;}.ssc-statement h2{font-size:16px;color:#2165a8;margin:22px 0 9px;page-break-after:avoid;}
+            .ssc-statement table{width:100%;border-collapse:collapse;table-layout:fixed;}.ssc-statement td,.ssc-statement th{padding:7px 5px;vertical-align:top;word-wrap:break-word;}
+            .ssc-statement th{background:#edf3fa;color:#142b48;border-bottom:2px solid #c4d5e7;text-align:left;font-size:12px;}
+            .ssc-statement .items td{border-bottom:1px solid #dce4ed;}.ssc-statement thead{display:table-header-group;}.ssc-statement tr{page-break-inside:avoid;}
+            .ssc-statement .num{text-align:right;}.ssc-statement .muted{color:#5b6e83;font-size:11px;}.ssc-statement .reason{white-space:pre-line;padding:12px;background:#f6f8fb;border-left:3px solid #2165a8;}
+            .ssc-statement .total{font-size:17px;font-weight:bold;color:#142b48;background:#edf3fa;padding:12px;text-align:right;margin-top:16px;page-break-inside:avoid;}
+          </style>
+          <div class="ssc-statement">
+            <div style="color:#142b48;font-size:12px;border-bottom:2px solid #2165a8;padding-bottom:10px;margin-bottom:20px;">
+              <table><tr><td style="width:24%;vertical-align:top;"><img t-if="s.get('logo')" t-att-src="s['logo']" style="max-height:65px;max-width:130px;"/></td>
+                <td style="text-align:right;"><strong style="font-size:20px;" t-out="s['company']"/><div style="white-space:pre-line;" t-out="s['company_address']"/><div><t t-out="s['company_email']"/> <t t-out="s['company_phone']"/></div></td></tr></table>
+            </div>
+            <h1>Supplier Shortage Claim Statement</h1><div class="muted">Prepared for supplier review · approved untaxed claim basis</div>
+            <table style="margin-top:18px;"><tr><td style="width:58%;"><strong>To: <t t-out="s['supplier']"/></strong><div style="white-space:pre-line;" t-out="s['supplier_address']"/></td>
+              <td><strong>Claim: </strong><t t-out="s['claim']"/><br/><strong>Revision: </strong><t t-out="o.revision"/><br/>
+                <strong>Claim date: </strong><t t-out="s['claim_date']"/><br/><strong>Purchase order: </strong><t t-out="s['purchase']"/><br/>
+                <strong>Prepared: </strong><t t-out="s.get('submission_date','')"/></td></tr></table>
+            <h2>Shortage details</h2>
+            <table class="items"><thead><tr><th style="width:27%;">Product / PO item</th><th class="num" style="width:8%;">Ordered</th><th class="num" style="width:8%;">Received</th><th class="num" style="width:8%;">Claim</th><th style="width:8%;">UoM</th><th class="num" style="width:12%;">Unit basis*</th><th class="num" style="width:8%;">Discount</th><th class="num" style="width:21%;">Untaxed claim</th></tr></thead>
+              <tbody><tr t-foreach="s['lines']" t-as="line"><td><strong t-out="line['product']"/><div class="muted"><t t-out="line.get('code','')"/> · PO item <t t-out="line['po_line']"/></div></td>
+                <td class="num" t-out="line['ordered']"/><td class="num" t-out="line['received']"/><td class="num"><strong t-out="line['quantity']"/></td><td t-out="line['uom']"/>
+                <td class="num" t-out="o._money(line['unit_amount'])"/><td class="num"><t t-out="line['discount']"/>%</td><td class="num"><strong t-out="o._money(line['amount'])"/></td></tr></tbody>
+            </table>
+            <p class="muted">* Effective untaxed value per purchasing UoM; display rounding applies. Line claims use reviewed quantities and the posted bill's native untaxed subtotal after discount. No additional tax-inclusive total is asserted.</p>
+            <div class="total">Approved untaxed claim: <t t-out="o._money(s['amount'])"/> <span style="font-size:12px;" t-out="s['currency']"/></div>
+            <h2>Discrepancy explanation</h2><div class="reason" t-out="s['reason']"/>
+            <h2>Selected evidence index</h2>
+            <table class="items" t-if="s['evidence']"><thead><tr><th style="width:45%;">Document</th><th style="width:30%;">Category</th><th style="width:25%;">Document revision</th></tr></thead>
+              <tbody><tr t-foreach="s['evidence']" t-as="e"><td t-out="e['name']"/><td t-out="e['type']"/><td t-out="e['revision']"/></tr></tbody></table>
+            <p t-else="">This package contains the claim statement only, as permitted by the company's submission policy.</p>
+            <div style="page-break-inside:avoid;"><h2>Response requested</h2><p>Please review the discrepancy and selected supporting documents. Quote <strong t-out="s['claim']"/> and revision <strong t-out="o.revision"/> in your response.</p>
+            <p>Please contact <strong t-out="s['company_email']"/> for clarification or to request additional information.</p>
+            <p class="muted">This statement requests supplier review. It is not a posted accounting receivable, supplier acceptance, settlement confirmation or record of financial recovery.</p>
+            </div>
+          </div>
+        </div>
+        <div class="footer" style="font-family:Arial,sans-serif;font-size:10px;color:#5b6e83;border-top:1px solid #dce4ed;padding-top:7px;">
+          <t t-out="s['company']"/> · <t t-out="s['claim']"/> · Revision <t t-out="o.revision"/>
+          <span style="float:right;">Page <span class="page"/> / <span class="topage"/></span>
+        </div>
+      </t>
+    </main></body></html>
+  </template>
+</odoo>

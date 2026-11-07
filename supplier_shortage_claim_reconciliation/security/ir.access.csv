@@ -1,0 +1,92 @@
+id,name,model_id,group_id/id,operation,domain
+supplier_shortage_claim_company,supplier_shortage_claim company restriction,supplier.shortage.claim,,crud,"[('company_id', 'in', company_ids)]"
+supplier_shortage_claim_warehouse_user,supplier_shortage_claim warehouse_user,supplier.shortage.claim,group_warehouse_user,r,
+supplier_shortage_claim_claim_user,supplier_shortage_claim claim_user,supplier.shortage.claim,group_claim_user,cru,
+supplier_shortage_claim_accounts_reviewer,supplier_shortage_claim accounts_reviewer,supplier.shortage.claim,group_accounts_reviewer,r,
+supplier_shortage_claim_line_company,supplier_shortage_claim_line company restriction,supplier.shortage.claim.line,,crud,"[('company_id', 'in', company_ids)]"
+supplier_shortage_claim_line_warehouse_user,supplier_shortage_claim_line warehouse_user,supplier.shortage.claim.line,group_warehouse_user,r,
+supplier_shortage_claim_line_claim_user,supplier_shortage_claim_line claim_user,supplier.shortage.claim.line,group_claim_user,cru,
+supplier_shortage_claim_line_accounts_reviewer,supplier_shortage_claim_line accounts_reviewer,supplier.shortage.claim.line,group_accounts_reviewer,r,
+supplier_shortage_claim_module_admin,supplier_shortage_claim admin read,supplier.shortage.claim,group_module_admin,r,
+supplier_shortage_claim_line_module_admin,supplier_shortage_claim_line admin read,supplier.shortage.claim.line,group_module_admin,r,
+claim_audit_company,claim audit company and parent,supplier.shortage.claim.audit,,crud,"[('company_id', 'in', company_ids), '|', ('claim_id', 'access', 'read'), ('receipt_exception_id', 'access', 'read')]"
+claim_audit_warehouse_user,claim audit warehouse_user,supplier.shortage.claim.audit,group_warehouse_user,r,
+claim_audit_claim_user,claim audit claim_user,supplier.shortage.claim.audit,group_claim_user,r,
+claim_audit_accounts_reviewer,claim audit accounts_reviewer,supplier.shortage.claim.audit,group_accounts_reviewer,r,
+claim_audit_module_admin,claim audit module_admin,supplier.shortage.claim.audit,group_module_admin,r,
+claim_attachment_read,claim attachment parent privacy,ir.attachment,,r,"['|', ('res_model', 'not in', ['supplier.shortage.claim', 'supplier.shortage.claim.line', 'supplier.shortage.claim.audit', 'supplier.shortage.claim.evidence']), ('res_access_read', '=', True)]"
+receipt_exception_company,receiving exception company and source,supplier.shortage.receipt.exception,,crud,"[('company_id', 'in', company_ids), ('purchase_id', 'access', 'read')]"
+receipt_exception_warehouse_user,receiving exception warehouse_user,supplier.shortage.receipt.exception,group_warehouse_user,ru,
+receipt_exception_claim_user,receiving exception claim_user,supplier.shortage.receipt.exception,group_claim_user,cru,
+receipt_exception_accounts_reviewer,receiving exception accounts_reviewer,supplier.shortage.receipt.exception,group_accounts_reviewer,r,
+receipt_exception_module_admin,receiving exception module_admin,supplier.shortage.receipt.exception,group_module_admin,r,
+billing_exception_accounts,accounts billing exception review,supplier.shortage.receipt.exception,group_accounts_reviewer,cru,"[('reconciliation_kind', '=', 'billing')]"
+
+claim_evidence_company,claim evidence company and parent,supplier.shortage.claim.evidence,,crud,"[('company_id', 'in', company_ids), ('claim_id', 'access', 'read')]"
+claim_evidence_claim_user,claim evidence claim user,supplier.shortage.claim.evidence,group_claim_user,cru,
+claim_evidence_warehouse,claim evidence warehouse,supplier.shortage.claim.evidence,group_warehouse_user,cru,
+claim_evidence_accounts,claim evidence accounts,supplier.shortage.claim.evidence,group_accounts_reviewer,r,
+claim_evidence_admin,claim evidence admin,supplier.shortage.claim.evidence,group_module_admin,r,
+claim_prepare_wizard,claim prepare wizard,supplier.shortage.prepare.wizard,group_claim_user,crud,
+claim_prepare_wizard_line,claim prepare wizard line,supplier.shortage.prepare.wizard.line,group_claim_user,crud,
+claim_evidence_policy_wizard,claim evidence configuration,supplier.shortage.evidence.policy.wizard,group_module_admin,crud,
+
+advanced_evidence_accounts,accounting evidence review,supplier.shortage.claim.evidence,group_accounts_reviewer,cru,
+evidence_revision_wizard,claim evidence revision,supplier.shortage.evidence.revision.wizard,group_claim_user,crud,
+evidence_revision_warehouse,warehouse evidence revision,supplier.shortage.evidence.revision.wizard,group_warehouse_user,crud,
+evidence_revision_accounts,accounting evidence revision,supplier.shortage.evidence.revision.wizard,group_accounts_reviewer,crud,
+warehouse_observation_company,warehouse observation scope,supplier.shortage.warehouse.observation,,crud,"[('company_id','in',company_ids),('claim_id','access','read'),('claim_line_id','access','read')]"
+warehouse_observation_claim,claim physical observations,supplier.shortage.warehouse.observation,group_claim_user,cru,
+warehouse_observation_warehouse,warehouse physical observations,supplier.shortage.warehouse.observation,group_warehouse_user,cru,
+warehouse_observation_accounts,accounting physical observations,supplier.shortage.warehouse.observation,group_accounts_reviewer,r,
+warehouse_observation_admin,configuration observation visibility,supplier.shortage.warehouse.observation,group_module_admin,r,
+evidence_requirement_company,evidence requirement company,supplier.shortage.evidence.requirement,,crud,"[('company_id','in',company_ids)]"
+evidence_requirement_read,evidence requirement visibility,supplier.shortage.evidence.requirement,base.group_user,r,
+evidence_requirement_admin,evidence policy configuration,supplier.shortage.evidence.requirement,group_module_admin,cru,
+evidence_exception_company,evidence exception scope,supplier.shortage.evidence.exception,,crud,"[('company_id','in',company_ids),('claim_id','access','read'),('claim_line_id','access','read')]"
+evidence_exception_user,evidence exception requests,supplier.shortage.evidence.exception,group_claim_user,cru,
+
+warehouse_revision_claim,claim warehouse correction,supplier.shortage.warehouse.revision.wizard,group_claim_user,crud,
+warehouse_revision_user,warehouse observation correction,supplier.shortage.warehouse.revision.wizard,group_warehouse_user,crud,
+approval_policy_company,approval policy company,supplier.shortage.approval.policy,,crud,"[('company_id','in',company_ids)]"
+approval_policy_read,approval policy visibility,supplier.shortage.approval.policy,base.group_user,r,
+approval_policy_admin,approval policy maintenance,supplier.shortage.approval.policy,group_module_admin,cru,
+approval_cycle_company,approval cycle parent,supplier.shortage.approval.cycle,,crud,"[('company_id','in',company_ids),('claim_id','access','read')]"
+approval_cycle_claim,approval cycle claim visibility,supplier.shortage.approval.cycle,group_claim_user,ru,
+approval_cycle_accounts,approval cycle accounts visibility,supplier.shortage.approval.cycle,group_accounts_reviewer,ru,
+approval_cycle_admin,approval cycle admin visibility,supplier.shortage.approval.cycle,group_module_admin,ru,
+approval_step_company,approval step parent,supplier.shortage.claim.approval,,crud,"[('company_id','in',company_ids),('cycle_id','access','read')]"
+approval_step_claim,approval step claim visibility,supplier.shortage.claim.approval,group_claim_user,ru,
+approval_step_accounts,approval step accounts visibility,supplier.shortage.claim.approval,group_accounts_reviewer,ru,
+approval_step_admin,approval step admin visibility,supplier.shortage.claim.approval,group_module_admin,ru,
+approval_accounts_claim_update,accounts controlled workflow,supplier.shortage.claim,group_accounts_reviewer,ru,
+approval_accounts_line_update,accounts readiness metadata,supplier.shortage.claim.line,group_accounts_reviewer,ru,
+approval_admin_claim_update,administrator reassignment,supplier.shortage.claim,group_module_admin,ru,
+approval_review_wizard_claim,approval review wizard claims,supplier.shortage.approval.wizard,group_claim_user,crud,
+approval_review_wizard_accounts,approval review wizard accounts,supplier.shortage.approval.wizard,group_accounts_reviewer,crud,
+approval_review_wizard_admin,approval review wizard configuration,supplier.shortage.approval.wizard,group_module_admin,crud,
+
+
+approval_accounts_evidence_exceptions,accounts evidence exceptions visibility,supplier.shortage.evidence.exception,group_accounts_reviewer,r,
+submission_policy_company,submission policy company,supplier.shortage.submission.policy,,crud,"[('company_id','in',company_ids)]"
+submission_policy_read,submission policy visibility,supplier.shortage.submission.policy,base.group_user,r,
+submission_policy_admin,submission policy configuration,supplier.shortage.submission.policy,group_module_admin,cru,
+supplier_contact_company,supplier contact company,supplier.shortage.supplier.contact,,crud,"[('company_id','in',company_ids)]"
+supplier_contact_read,supplier contact visibility,supplier.shortage.supplier.contact,base.group_user,r,
+supplier_contact_admin,supplier contact configuration,supplier.shortage.supplier.contact,group_module_admin,crud,
+submission_company,submission company and claim,supplier.shortage.claim.submission,,crud,"[('company_id','in',company_ids),('claim_id','access','read')]"
+submission_sender,submission employee workflow,supplier.shortage.claim.submission,group_external_sender,cru,
+submission_claim_read,submission purchase visibility,supplier.shortage.claim.submission,group_claim_user,r,
+submission_accounts_read,submission accounts visibility,supplier.shortage.claim.submission,group_accounts_reviewer,r,
+submission_admin_read,submission configuration visibility,supplier.shortage.claim.submission,group_module_admin,r,
+communication_company,supplier communication company,supplier.shortage.claim.communication,,crud,"[('company_id','in',company_ids),('submission_id','access','read')]"
+communication_sender,supplier communication authorized logging,supplier.shortage.claim.communication,group_external_sender,cru,
+communication_claim_read,supplier communication purchase visibility,supplier.shortage.claim.communication,group_claim_user,r,
+communication_accounts_read,supplier communication accounts visibility,supplier.shortage.claim.communication,group_accounts_reviewer,r,
+communication_admin_read,supplier communication admin visibility,supplier.shortage.claim.communication,group_module_admin,r,
+supplier_send_wizard,supplier protected composer,supplier.shortage.claim.send.wizard,group_external_sender,crud,
+supplier_sharing_wizard,supplier disclosure approval,supplier.shortage.sharing.wizard,group_external_sender,crud,
+supplier_manage_wizard,supplier communication management,supplier.shortage.submission.manage.wizard,group_external_sender,crud,
+submission_attachment_read,private supplier snapshot access,ir.attachment,,r,"['|',('res_model','!=','supplier.shortage.claim.submission'),('res_access_read','=',True)]"
+submission_dispatch_scope,dispatch guard company restriction,supplier.shortage.dispatch.attempt,,crud,"[('company_key','in',company_ids)]"
+submission_dispatch_admin,dispatch technical diagnostics,supplier.shortage.dispatch.attempt,base.group_system,r,

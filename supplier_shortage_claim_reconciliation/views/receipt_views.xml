@@ -1,0 +1,84 @@
+<odoo>
+    <record id="view_receipt_move_list" model="ir.ui.view">
+        <field name="name">stock.move.supplier.receiving.evidence.list</field><field name="model">stock.move</field><field name="priority">99</field>
+        <field name="arch" type="xml">
+            <list create="0" edit="0" delete="0">
+                <field name="picking_id"/><field name="date" string="Movement / Scheduled Date"/>
+                <field name="product_id"/><field name="ssc_purchase_line_id"/>
+                <field name="ssc_receipt_kind" widget="badge"/>
+                <field name="quantity" string="Done Source Quantity" invisible="state != 'done'"/>
+                <field name="product_uom_qty" string="Movement Demand" optional="hide"/><field name="uom_id"/>
+                <field name="ssc_quantity_available" column_invisible="True"/>
+                <field name="ssc_completed_purchase_qty" invisible="not ssc_quantity_available"/><field name="ssc_purchase_uom_id"/>
+                <field name="ssc_warehouse_id"/><field name="location_id"/><field name="location_dest_id"/>
+                <field name="state"/><field name="ssc_backorder_id"/><field name="origin_returned_move_id" optional="hide"/>
+            </list>
+        </field>
+    </record>
+    <record id="view_receipt_move_form" model="ir.ui.view">
+        <field name="name">stock.move.supplier.receiving.evidence.form</field><field name="model">stock.move</field><field name="priority">99</field>
+        <field name="arch" type="xml">
+            <form create="0" edit="0" delete="0">
+                <header><button name="action_ssc_open_picking" type="object" string="Open Stock Operation" invisible="not picking_id"/></header>
+                <sheet>
+                    <group><group><field name="picking_id"/><field name="product_id"/><field name="ssc_purchase_line_id"/><field name="ssc_receipt_kind"/></group>
+                    <group><field name="company_id"/><field name="ssc_warehouse_id"/><field name="picking_type_id"/><field name="state"/><field name="date"/></group></group>
+                    <group string="Physical Movement">
+                        <field name="product_uom_qty"/><field name="quantity" invisible="state != 'done'"/><field name="uom_id"/>
+                        <field name="ssc_quantity_available" invisible="True"/><field name="ssc_completed_purchase_qty" invisible="not ssc_quantity_available"/>
+                        <field name="ssc_purchase_uom_id"/><field name="location_id"/><field name="location_dest_id"/>
+                        <field name="ssc_backorder_id"/><field name="origin_returned_move_id"/>
+                    </group>
+                    <group string="Native Lot / Serial Traceability">
+                        <field name="move_line_ids" readonly="True"><list create="0" edit="0" delete="0">
+                            <field name="product_id"/><field name="quantity"/><field name="uom_id"/><field name="lot_id"/>
+                            <field name="location_id"/><field name="location_dest_id"/>
+                        </list></field>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="view_claim_receiving_form" model="ir.ui.view">
+        <field name="name">supplier.shortage.claim.receiving.form</field><field name="model">supplier.shortage.claim</field>
+        <field name="inherit_id" ref="view_claim_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//header" position="inside">
+                <button name="action_view_related_receipts" type="object" string="View Related Receipts" invisible="not purchase_id or not receiving_accessible"/>
+            </xpath>
+            <xpath expr="//notebook" position="inside">
+                <page string="Goods Receipt Reconciliation">
+                    <div class="alert alert-info" role="status">Physical receiving position only. Pending delivery, cancelled backorders and supplier returns do not establish a confirmed shortage or financial recovery.</div>
+                    <field name="receiving_accessible" invisible="True"/>
+                    <div class="alert alert-warning" role="status" invisible="not receiving_review_warning"><field name="receiving_review_warning" nolabel="1"/></div>
+                    <group invisible="not receiving_accessible"><field name="receipt_count"/><field name="receipt_move_count"/></group>
+                    <field name="receiving_summary" nolabel="1"/>
+                    <button name="action_view_receiving_movements" type="object" string="Open All Related Movements" invisible="not receiving_accessible"/>
+                    <p class="text-muted">Preview limited to 40 movements. Open the paginated list for full provenance. Internal transfers support traceability and never add supplier receipt quantity. Not Yet Received uses gross supplier receipts, not on-hand stock.</p>
+                    <field name="receipt_move_preview_ids" context="{'form_view_ref': 'supplier_shortage_claim_reconciliation.view_receipt_move_form'}" readonly="True" invisible="not receiving_accessible">
+                        <list create="0" edit="0" delete="0">
+                            <field name="picking_id"/><field name="date" string="Movement / Scheduled Date"/><field name="product_id"/><field name="ssc_receipt_kind" widget="badge"/>
+                            <field name="quantity" invisible="state != 'done'" string="Done Source Quantity"/><field name="uom_id"/>
+                            <field name="ssc_quantity_available" column_invisible="True"/>
+                            <field name="ssc_completed_purchase_qty" invisible="not ssc_quantity_available"/><field name="ssc_purchase_uom_id"/>
+                            <field name="ssc_warehouse_id"/><field name="location_id"/><field name="location_dest_id"/><field name="state"/>
+                            <field name="ssc_backorder_id"/>
+                        </list>
+                    </field>
+                </page>
+            </xpath>
+            <xpath expr="//field[@name='claim_line_ids']/list/field[@name='note']" position="before">
+                <field name="receiving_status" optional="hide"/>
+            </xpath>
+            <xpath expr="//field[@name='claim_line_ids']/form/group[last()]" position="after">
+                <group string="Live Receiving Position (Not Verified Shortage)">
+                    <field name="receiving_status"/><field name="receiving_note"/><field name="receiving_complete" invisible="True"/>
+                    <field name="receipt_uom_id"/><field name="receipt_ordered_qty" invisible="not receiving_complete"/>
+                    <field name="receipt_gross_qty" invisible="not receiving_complete"/><field name="receipt_return_qty" invisible="not receiving_complete"/>
+                    <field name="receipt_net_qty" invisible="not receiving_complete"/><field name="receipt_pending_qty" invisible="not receiving_complete"/>
+                    <field name="receipt_backorder_qty" invisible="not receiving_complete"/><field name="receipt_unreceived_qty" invisible="not receiving_complete"/>
+                </group>
+            </xpath>
+        </field>
+    </record>
+</odoo>

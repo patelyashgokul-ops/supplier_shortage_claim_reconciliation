@@ -1,0 +1,13 @@
+<odoo noupdate="1">
+    <record id="sequence_claim" model="ir.sequence">
+        <field name="name">Supplier Shortage Claim</field>
+        <field name="code">supplier.shortage.claim</field>
+        <field name="prefix">SSC/</field>
+        <field name="padding">6</field>
+        <field name="company_id" eval="False"/>
+    </record>
+    <record id="sequence_receiving_exception" model="ir.sequence">
+        <field name="name">Receiving Exception</field><field name="code">supplier.shortage.receipt.exception</field>
+        <field name="prefix">RRE/</field><field name="padding">6</field><field name="company_id" eval="False"/>
+    </record>
+</odoo>

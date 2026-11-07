@@ -1,0 +1,88 @@
+<odoo>
+  <record id="view_approval_policy_list" model="ir.ui.view">
+    <field name="name">supplier.shortage.approval.policy.list</field><field name="model">supplier.shortage.approval.policy</field>
+    <field name="arch" type="xml"><list><field name="name"/><field name="company_id"/><field name="currency_id"/><field name="minimum_amount"/><field name="maximum_amount"/><field name="approval_chain"/><field name="separate_approvers_required"/><field name="active"/></list></field>
+  </record>
+  <record id="view_approval_policy_form" model="ir.ui.view">
+    <field name="name">supplier.shortage.approval.policy.form</field><field name="model">supplier.shortage.approval.policy</field>
+    <field name="arch" type="xml"><form delete="0"><sheet><div class="oe_title"><h1><field name="name"/></h1></div>
+      <div class="alert alert-info">Thresholds use company currency. The lower bound is exclusive (zero includes zero); the upper bound is inclusive. A zero upper bound means unlimited. Uncovered values block submission.</div>
+      <group><group string="Company Authorization"><field name="company_id"/><field name="currency_id"/><field name="active"/><field name="approval_chain"/><field name="separate_approvers_required"/></group>
+      <group string="Threshold and Effective Dates"><field name="minimum_amount"/><field name="maximum_amount"/><field name="effective_from"/><field name="effective_to"/><field name="deadline_days"/></group></group>
+      <field name="configuration_notes" placeholder="Document company approval limits and independent reviewer requirements."/>
+    </sheet></form></field>
+  </record>
+  <record id="view_claim_approval_list" model="ir.ui.view">
+    <field name="name">supplier.shortage.claim.approval.list</field><field name="model">supplier.shortage.claim.approval</field>
+    <field name="arch" type="xml"><list create="0" edit="0" delete="0" decoration-success="state == 'approved'" decoration-danger="state == 'rejected'" decoration-warning="overdue">
+      <field name="claim_id"/><field name="partner_id"/><field name="company_id" groups="base.group_multi_company"/><field name="purchase_id"/>
+      <field name="cycle_id"/><field name="role"/><field name="amount"/><field name="currency_id"/><field name="assigned_user_id"/><field name="state" widget="badge"/>
+      <field name="claim_approval_status" widget="badge"/><field name="create_date" string="Requested"/><field name="days_pending"/><field name="deadline"/><field name="overdue" optional="hide"/>
+    </list></field>
+  </record>
+  <record id="view_claim_approval_form" model="ir.ui.view">
+    <field name="name">supplier.shortage.claim.approval.form</field><field name="model">supplier.shortage.claim.approval</field>
+    <field name="arch" type="xml"><form create="0" edit="0" delete="0"><header>
+      <field name="can_decide" invisible="True"/>
+      <button name="action_approve" type="object" string="Approve Stage" class="oe_highlight" invisible="not can_decide"/>
+      <button name="action_open_decision" type="object" string="Reject / Return" invisible="not can_decide"/>
+      <button name="action_open_decision" type="object" string="Reassign" groups="supplier_shortage_claim_reconciliation.group_module_admin" invisible="state != 'pending'"/>
+      <field name="state" widget="statusbar" statusbar_visible="waiting,pending,approved"/>
+    </header><sheet><div class="alert alert-info">Internal approval authorizes the next company review stage. It does not establish supplier acceptance or financial recovery.</div><group><field name="claim_approval_status" widget="badge"/></group>
+      <group><group string="Claim and Authorization"><field name="claim_id"/><field name="partner_id"/><field name="purchase_id"/><field name="company_id"/><field name="cycle_id"/><field name="role"/><field name="sequence"/></group>
+      <group string="Reviewed Exposure"><field name="amount"/><field name="currency_id"/><field name="assigned_user_id"/><field name="create_date"/><field name="deadline"/><field name="days_pending"/><field name="overdue"/></group></group>
+      <group string="Decision Record"><field name="decision_by"/><field name="decision_at"/><field name="reason"/></group>
+    </sheet></form></field>
+  </record>
+  <record id="view_claim_approval_search" model="ir.ui.view">
+    <field name="name">supplier.shortage.claim.approval.search</field><field name="model">supplier.shortage.claim.approval</field>
+    <field name="arch" type="xml"><search><field name="claim_id"/><field name="partner_id"/><field name="assigned_user_id"/><field name="company_id"/>
+      <filter name="assigned_me" string="Assigned to Me" domain="[('assigned_user_id','=',uid)]"/>
+      <filter name="purchase" string="Purchase" domain="[('role','=','purchase'),('state','=','pending')]"/>
+      <filter name="accounts" string="Accounts" domain="[('role','=','accounts'),('state','=','pending')]"/>
+      <filter name="finance" string="Finance" domain="[('role','=','finance'),('state','=','pending')]"/>
+      <filter name="returned" string="Returned" domain="[('state','=','returned')]"/><filter name="rejected" string="Rejected" domain="[('state','=','rejected')]"/>
+      <filter name="approved" string="Internally Approved" domain="[('claim_id.approval_status','=','approved')]"/>
+      <filter name="requested" string="Requested Date" date="create_date"/>
+      <group><filter name="by_role" string="Stage" context="{'group_by':'role'}"/><filter name="by_company" string="Company" context="{'group_by':'company_id'}"/><filter name="by_claim" string="Claim" context="{'group_by':'claim_id'}"/></group>
+    </search></field>
+  </record>
+  <record id="view_approval_cycle_form" model="ir.ui.view">
+    <field name="name">supplier.shortage.approval.cycle.form</field><field name="model">supplier.shortage.approval.cycle</field>
+    <field name="arch" type="xml"><form create="0" edit="0" delete="0"><sheet><group><field name="claim_id"/><field name="company_id"/><field name="number"/><field name="state"/><field name="policy_id"/><field name="amount"/><field name="currency_id"/><field name="comparison_amount"/><field name="company_currency_id"/><field name="conversion_date"/></group>
+      <notebook><page string="Frozen Approval Basis"><field name="snapshot"/><field name="conversion_basis"/><field name="fingerprint"/></page><page string="Stages"><field name="step_ids" readonly="1"/></page></notebook>
+    </sheet></form></field>
+  </record>
+  <record id="view_approval_wizard" model="ir.ui.view">
+    <field name="name">supplier.shortage.approval.wizard.form</field><field name="model">supplier.shortage.approval.wizard</field>
+    <field name="arch" type="xml"><form string="Document Internal Review"><group><field name="claim_id" readonly="1" invisible="not claim_id"/><field name="step_id" readonly="1" invisible="not step_id"/><field name="operation"/><field name="assigned_user_id" invisible="operation != 'reassign'" required="operation == 'reassign'"/><field name="reason" placeholder="Document the evidence reviewed, correction required, or reassignment justification."/></group><footer><button name="action_apply" type="object" string="Confirm Review" class="oe_highlight"/><button special="cancel" string="Cancel"/></footer></form></field>
+  </record>
+  <record id="view_claim_internal_approval" model="ir.ui.view">
+    <field name="name">supplier.shortage.claim.internal.approval</field><field name="model">supplier.shortage.claim</field><field name="inherit_id" ref="view_claim_form"/>
+    <field name="arch" type="xml">
+      <xpath expr="//header" position="inside"><button name="action_open_approval_review" type="object" string="Financial Review / Correction" invisible="state != 'under_review'" groups="supplier_shortage_claim_reconciliation.group_accounts_reviewer,supplier_shortage_claim_reconciliation.group_claim_manager"/>
+        <button name="action_request_internal_approval" type="object" string="Request Internal Approval" class="oe_highlight" invisible="state != 'under_review' or approval_status not in ('none','returned','rejected','stale')" groups="supplier_shortage_claim_reconciliation.group_claim_user"/>
+      </xpath>
+      <xpath expr="//notebook" position="before"><group string="Internal Authorization"><field name="approval_status" widget="badge"/><field name="approval_cycle"/><field name="verified_amount"/><field name="financial_reviewer_id"/></group></xpath>
+      <xpath expr="//notebook" position="inside"><page string="Approval Journey"><div class="alert alert-info">Internal Approval ≠ Supplier Acceptance. Approved Amount ≠ Recovered Amount. Open the pending stage to review or decide; unassigned requests use the authorized role pool.</div>
+        <group string="Verified Untaxed Financial Basis"><field name="financial_reviewed_at"/><field name="financial_review_note"/></group>
+        <field name="approval_step_ids" readonly="1"><list create="0" edit="0" delete="0" decoration-success="state == 'approved'"><field name="cycle_id"/><field name="sequence"/><field name="role"/><field name="assigned_user_id"/><field name="state" widget="badge"/><field name="decision_by"/><field name="decision_at"/><field name="reason"/></list></field>
+        <group string="Previous Cycles and Frozen Source Snapshots"><field name="approval_cycle_ids" readonly="1"><list create="0" edit="0" delete="0"><field name="number"/><field name="policy_id"/><field name="state"/><field name="amount"/><field name="currency_id"/><field name="comparison_amount"/><field name="company_currency_id"/><field name="conversion_date"/></list></field></group>
+        <group string="Current Reviewed Line Provenance"><field name="verified_basis" readonly="1"/></group>
+      </page></xpath>
+    </field>
+  </record>
+  <record id="action_approval_requests" model="ir.actions.act_window"><field name="name">All Approval Requests</field><field name="res_model">supplier.shortage.claim.approval</field><field name="view_mode">list,form</field><field name="help" type="html"><p class="o_view_nocontent_smiling_face">No internal approval requests.</p><p>Prepare and verify a claim, review its financial value, then request internal approval.</p></field></record>
+  <record id="action_my_approvals" model="ir.actions.server"><field name="name">My Pending Approvals</field><field name="model_id" ref="model_supplier_shortage_claim_approval"/><field name="state">code</field><field name="code">action = model.action_my_pending()</field></record>
+  <record id="action_high_value_approvals" model="ir.actions.act_window"><field name="name">High-Value Claims</field><field name="res_model">supplier.shortage.claim.approval</field><field name="view_mode">list,form</field><field name="domain">[('role','=','finance')]</field></record>
+  <record id="action_returned_approvals" model="ir.actions.act_window"><field name="name">Returned for Correction</field><field name="res_model">supplier.shortage.claim</field><field name="view_mode">list,form</field><field name="domain">[('approval_status','in',['returned','stale'])]</field></record>
+  <record id="action_approval_history" model="ir.actions.act_window"><field name="name">Approval History</field><field name="res_model">supplier.shortage.claim.approval</field><field name="view_mode">list,form</field><field name="domain">[('state','in',['approved','rejected','returned','superseded'])]</field></record>
+  <record id="action_approval_policies" model="ir.actions.act_window"><field name="name">Approval Policies</field><field name="res_model">supplier.shortage.approval.policy</field><field name="view_mode">list,form</field></record>
+  <menuitem id="menu_approval_center" name="Approvals" parent="menu_recovery_root" sequence="25" groups="group_claim_user,group_accounts_reviewer,group_module_admin"/>
+  <menuitem id="menu_my_approvals" name="My Pending Approvals" parent="menu_approval_center" action="action_my_approvals" sequence="10"/>
+  <menuitem id="menu_all_approvals" name="All Approval Requests" parent="menu_approval_center" action="action_approval_requests" sequence="20"/>
+  <menuitem id="menu_high_value_approvals" name="High-Value Claims" parent="menu_approval_center" action="action_high_value_approvals" sequence="30"/>
+  <menuitem id="menu_returned_approvals" name="Returned for Correction" parent="menu_approval_center" action="action_returned_approvals" sequence="40"/>
+  <menuitem id="menu_approval_history" name="Approval History" parent="menu_approval_center" action="action_approval_history" sequence="50"/>
+  <menuitem id="menu_approval_policies" name="Approval Policies" parent="menu_approval_center" action="action_approval_policies" sequence="60" groups="group_module_admin"/>
+</odoo>

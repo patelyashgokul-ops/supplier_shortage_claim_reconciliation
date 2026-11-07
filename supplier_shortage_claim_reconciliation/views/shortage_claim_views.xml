@@ -1,0 +1,122 @@
+<odoo>
+    <record id="view_claim_list" model="ir.ui.view">
+        <field name="name">supplier.shortage.claim.list</field>
+        <field name="model">supplier.shortage.claim</field>
+        <field name="arch" type="xml">
+            <list delete="0"><field name="name"/><field name="partner_id"/><field name="purchase_id"/><field name="user_id"/><field name="claim_date"/><field name="company_id" groups="base.group_multi_company"/><field name="state" widget="badge"/></list>
+        </field>
+    </record>
+    <record id="view_claim_form" model="ir.ui.view">
+        <field name="name">supplier.shortage.claim.form</field>
+        <field name="model">supplier.shortage.claim</field>
+        <field name="arch" type="xml">
+            <form delete="0">
+                <header>
+                    <button name="action_submit_for_review" type="object" string="Submit for Review" class="oe_highlight" invisible="state != 'draft'" groups="supplier_shortage_claim_reconciliation.group_claim_user"/>
+                    <button name="action_return_to_draft" type="object" string="Return to Draft" invisible="state != 'under_review'" groups="supplier_shortage_claim_reconciliation.group_claim_manager"/>
+                    <button name="action_refresh_provisional_valuation" type="object" string="Refresh Draft Estimate" invisible="state != 'draft'" groups="supplier_shortage_claim_reconciliation.group_claim_user"/>
+                    <button name="action_open_purchase_order" type="object" string="Open Purchase Order" invisible="not purchase_id or purchase_source_status == 'unavailable'"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,under_review"/>
+                </header>
+                <sheet>
+                    <div class="oe_title"><h1><field name="name"/></h1></div>
+                    <group><group><field name="partner_id" readonly="state != 'draft'"/><field name="purchase_id" readonly="state != 'draft'" domain="[('partner_id', '=', partner_id), ('company_id', '=', company_id)]"/></group>
+                    <group><field name="company_id" groups="base.group_multi_company" readonly="id or state != 'draft'"/><field name="user_id" readonly="state != 'draft'"/><field name="claim_date" required="True" readonly="state != 'draft'"/><field name="currency_id"/></group></group>
+                    <group string="Purchase Context" invisible="not purchase_id">
+                        <field name="purchase_date"/><field name="purchase_buyer_id"/>
+                        <field name="purchase_state"/><field name="purchase_currency_id"/>
+                        <field name="purchase_source_status"/>
+                    </group>
+                    <div class="alert alert-warning" role="status" invisible="not purchase_source_warning"><field name="purchase_source_warning" nolabel="1"/></div>
+                    <div class="alert alert-info" role="status">Provisional estimate - pending receipt and bill reconciliation. Proposed quantities and values are not verified shortages or recovered funds.</div>
+                    <group string="Internal Review" invisible="not review_requested_at"><field name="review_requested_by"/><field name="review_requested_at"/></group>
+                    <notebook>
+                        <page string="Claim Lines">
+                            <field name="claim_line_ids" readonly="state != 'draft'">
+                                <list editable="bottom" delete="0">
+                                    <field name="company_id" column_invisible="True"/>
+                                    <field name="currency_id" column_invisible="True"/>
+                                    <field name="purchase_line_id" domain="[('order_id', '=', parent.purchase_id), ('display_type', '=', False), ('is_downpayment', '=', False), ('product_id.type', '=', 'consu')]"/>
+                                    <field name="product_id" readonly="True" force_save="1"/>
+                                    <field name="proposed_qty"/>
+                                    <field name="claim_uom_id" placeholder="Purchase UoM"/>
+                                    <field name="normalized_purchase_qty" invisible="not product_uom_id"/>
+                                    <field name="product_uom_id"/>
+                                    <field name="purchase_qty" invisible="not product_uom_id"/>
+                                    <field name="source_unit_price" invisible="not product_uom_id"/>
+                                    <field name="source_discount" optional="hide"/>
+                                    <field name="provisional_untaxed_amount" invisible="valuation_status != 'estimated'"/>
+                                    <field name="valuation_status" widget="badge"/>
+                                    <field name="note" optional="hide"/>
+                                </list>
+                                <form delete="0">
+                                    <header><button name="action_open_purchase_line" type="object" string="Open Purchase Line" invisible="not purchase_line_id or parent.purchase_source_status == 'unavailable'"/></header>
+                                    <group><field name="company_id" invisible="True"/><field name="currency_id"/>
+                                        <field name="purchase_line_id" domain="[('order_id', '=', parent.purchase_id), ('display_type', '=', False), ('is_downpayment', '=', False), ('product_id.type', '=', 'consu')]"/>
+                                        <field name="product_id" readonly="True" force_save="1"/>
+                                    </group>
+                                    <group string="Proposed Quantity">
+                                        <field name="proposed_qty"/><field name="claim_uom_id" placeholder="Blank uses purchasing UoM"/>
+                                        <field name="normalized_purchase_qty" invisible="not product_uom_id"/><field name="product_uom_id"/><field name="purchase_qty" invisible="not product_uom_id"/>
+                                    </group>
+                                    <group string="Provisional Purchase Valuation">
+                                        <field name="valuation_status"/><field name="valuation_note"/>
+                                        <field name="source_unit_price" invisible="not product_uom_id"/><field name="source_discount" invisible="not product_uom_id"/><field name="source_tax_mode"/>
+                                        <field name="provisional_unit_price" invisible="valuation_status != 'estimated'"/>
+                                        <field name="provisional_untaxed_amount" invisible="valuation_status != 'estimated'"/>
+                                    </group>
+                                    <group string="Last Submitted Basis" invisible="not valuation_snapshot_at">
+                                        <field name="valuation_snapshot_at"/><field name="snapshot_currency_id"/>
+                                        <field name="submitted_valuation_status"/><field name="submitted_untaxed_amount" invisible="submitted_valuation_status != 'estimated'"/>
+                                    </group>
+                                    <field name="note"/>
+                                </form>
+                            </field>
+                        </page>
+                        <page string="Audit History">
+                            <field name="audit_event_ids" readonly="True">
+                                <list create="0" edit="0" delete="0">
+                                    <field name="event_datetime"/><field name="event_type"/><field name="actor_id"/>
+                                    <field name="old_state"/><field name="new_state"/><field name="change_summary"/>
+                                    <field name="reason" optional="hide"/>
+                                </list>
+                                <form create="0" edit="0" delete="0">
+                                    <group><field name="event_datetime"/><field name="event_type"/><field name="actor_id"/>
+                                        <field name="company_id" groups="base.group_multi_company"/>
+                                        <field name="old_state"/><field name="new_state"/>
+                                    </group>
+                                    <field name="change_summary"/><field name="reason"/><field name="details"/>
+                                </form>
+                            </field>
+                        </page>
+                        <page string="Notes"><field name="note" readonly="state != 'draft'" placeholder="Record the context and references for this draft claim."/></page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+    <record id="view_claim_search" model="ir.ui.view">
+        <field name="name">supplier.shortage.claim.search</field>
+        <field name="model">supplier.shortage.claim</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="name"/><field name="partner_id"/><field name="purchase_id"/><field name="product_ids"/><field name="state"/><field name="user_id"/>
+                <field name="company_id" groups="base.group_multi_company"/>
+                <filter name="my_claims" string="My Claims" domain="[('user_id', '=', uid)]"/>
+                <filter name="claim_dates" string="Claim Date" date="claim_date"/>
+                <separator/>
+                <filter name="draft" string="Draft" domain="[('state', '=', 'draft')]"/>
+                <filter name="under_review" string="Under Review" domain="[('state', '=', 'under_review')]"/>
+                <group>
+                    <filter name="group_supplier" string="Supplier" context="{'group_by': 'partner_id'}"/>
+                    <filter name="group_purchase" string="Purchase Order" context="{'group_by': 'purchase_id'}"/>
+                    <filter name="group_state" string="State" context="{'group_by': 'state'}"/>
+                    <filter name="group_responsible" string="Responsible" context="{'group_by': 'user_id'}"/>
+                    <filter name="group_company" string="Company" context="{'group_by': 'company_id'}" groups="base.group_multi_company"/>
+                </group>
+            </search>
+        </field>
+    </record>
+    <record id="action_claim" model="ir.actions.act_window"><field name="name">Shortage Claims</field><field name="res_model">supplier.shortage.claim</field><field name="view_mode">list,form</field><field name="search_view_id" ref="view_claim_search"/></record>
+</odoo>

@@ -1,0 +1,17 @@
+<odoo><data noupdate="1">
+  <record id="mail_template_supplier_claim" model="mail.template">
+    <field name="name">Supplier Shortage Claim — Review Request</field><field name="model_id" ref="model_supplier_shortage_claim_submission"/>
+    <field name="subject">Supplier Shortage Claim {{ object.claim_id.name }} — {{ object.external_snapshot.get('purchase', '') }}</field>
+    <field name="email_from">{{ object.sender_email }}</field><field name="email_to">{{ object.recipient_email }}</field>
+    <field name="auto_delete" eval="False"/><field name="lang">{{ object.recipient_partner_id.lang or object.env.lang }}</field>
+    <field name="body_html" type="html"><div style="font-family:Arial,sans-serif;color:#24354b;font-size:14px;">
+      <p>Dear <t t-out="object.recipient_partner_id.name or object.external_snapshot.get('supplier')"/>,</p>
+      <p>Please review supplier shortage claim <strong t-out="object.claim_id.name"/>, revision <strong t-out="object.revision"/>, relating to purchase order <strong t-out="object.external_snapshot.get('purchase')"/>.</p>
+      <p t-out="object.external_snapshot.get('reason')"/>
+      <ul><li t-foreach="object.external_snapshot.get('lines',[])" t-as="line"><t t-out="line['product']"/>: <t t-out="line['quantity']"/> <t t-out="line['uom']"/> — <t t-out="object._money(line['amount'])"/> untaxed.</li></ul>
+      <p>Approved untaxed claim for your review: <strong t-out="object._money(object.amount)"/> <t t-out="object.currency_id.name"/>.</p>
+      <p>The claim statement and explicitly selected supporting files will accompany this message. Please quote the claim reference in your response and let us know if further information is needed.</p>
+      <p>Thank you for reviewing the discrepancy with us.</p><p>Kind regards,<br/><strong t-out="object.external_snapshot.get('company')"/><br/><t t-out="object.sender_email"/></p>
+    </div></field>
+  </record>
+</data></odoo>
