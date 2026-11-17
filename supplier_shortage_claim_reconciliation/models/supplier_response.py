@@ -236,6 +236,8 @@ class SupplierResponse(models.Model):
             raise ValidationError('Acceptance requires positive accepted quantity.')
         if self.response_type == 'rejection' and not any(self.line_ids.mapped('rejected_qty')):
             raise ValidationError('Rejection requires positive rejected quantity.')
+        if self.response_type == 'dispute' and not any(self.line_ids.mapped('disputed_qty')):
+            raise ValidationError('A disputed response requires an explicit positive disputed quantity.')
         old = self.search([('current_key','=',str(sub.id))])
         if self.line_ids:
             previous={line.claim_line_id.id:line.accepted_qty for line in old.line_ids}

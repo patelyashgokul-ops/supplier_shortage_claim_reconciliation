@@ -495,3 +495,40 @@ class TestSupplierResponse(SupplierSubmissionCase):
         with self.assertRaises(AccessError),self.cr.savepoint(): self._verify(rec)
         self._verify(rec,self.finance)
         self.assertEqual(rec.accepted_amount,20000)
+
+    def test_workbench_actions_preserve_communication_xmlids_and_valid_domains(self):
+        import ast
+        original=self.env.ref(M+'action_supplier_responses')
+        self.assertEqual(original.res_model,'supplier.shortage.claim.communication')
+        for xmlid in ('action_supplier_decisions','action_supplier_awaiting_reply','action_partial_supplier_responses',
+                      'action_rejected_supplier_responses','action_pending_supplier_responses','action_supplier_negotiations',
+                      'action_supplier_commitments','action_supplier_disputes','action_supplier_response_evidence'):
+            action=self.env.ref(M+xmlid)
+            self.env[action.res_model].with_user(self.sender).search_count(ast.literal_eval(action.domain or '[]'))
+
+    def test_native_case_offer_and_commitment_creation_forms(self):
+        with Form(self.Negotiation) as offer:
+            offer.submission_id=self.sub
+            offer.negotiation_type='supplier_offer'
+            offer.proposed_amount=15000
+            offer.currency_id=self.sub.currency_id
+            offer.tax_basis='untaxed'
+            offer.description='Supplier proposes an alternative financial consideration pending authorized company review.'
+        self.assertEqual(offer.record.status,'proposed')
+        with Form(self.Dispute) as dispute:
+            dispute.submission_id=self.sub
+            dispute.issue_reference='Native form recorded delivery dispute'
+            dispute.claim_line_id=self.claim.claim_line_ids
+            dispute.description='Supplier disputes this specific submitted delivery line and requests a joint warehouse investigation.'
+        self.assertEqual(dispute.record.dispute_state,'open')
+        response=self._response(12); self._verify(response)
+        with Form(self.Commitment) as commitment:
+            commitment.submission_id=self.sub
+            commitment.response_id=response
+            commitment.commitment_type='credit'
+            commitment.committed_amount=12000
+            commitment.currency_id=self.sub.currency_id
+            commitment.promised_date=fields.Date.today()+timedelta(days=7)
+            commitment.description='Supplier promises a future credit note; the original accounting settlement source has not been received.'
+        self.assertEqual(commitment.record.status,'promised')
+        self.assertEqual(self._fresh_claim().verified_recovery_amount,0)
