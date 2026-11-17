@@ -1246,10 +1246,12 @@ The reusable runner treats zero discovered tests as failure and stores detailed 
 Framework/prior-step inspection evidence is retained in `.testing/step14-inspection.json`.
 Browser-level visual/responsive review and real inbound mail delivery remain NOT VERIFIED.
 
-Currency presentation can itself require review: proportional source values are retained at full
-precision, while the currency widget rounds for display. If the displayed accepted/rejected/disputed/
-pending components do not reconcile at the currency's minor unit, **Financial Review Required** is
-shown. No rounding remainder is silently assigned to another business category.
+Known critical limitation: Odoo rounds Monetary field assignments before the response summary.
+For a 6.66 claim with all 20 units classified, proportional positions can round to 0.33 accepted,
+0.33 rejected and 5.99 disputed. The current implementation leaves 0.01 pending despite zero
+pending quantity, and its financial-review flag does not detect this reliably. This violates the
+required financial attribution safeguard. The failing test is retained as a release blocker;
+no settlement or recovery is created, and Step 14 must not be considered complete.
 
 For Level 2 without repeating the focused Step 14 class, the equivalent related regression selection is:
 
