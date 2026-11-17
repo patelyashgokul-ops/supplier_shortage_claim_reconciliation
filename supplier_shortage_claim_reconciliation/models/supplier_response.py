@@ -34,6 +34,12 @@ def current_submission(sub):
         raise AccessError('This approved scope requires Finance verification authority.')
 
 
+def version_submission(sub):
+    # Called only after authorization and locking; no commits or source writes.
+    sub.env.cr.execute("UPDATE supplier_shortage_claim_submission SET write_date=clock_timestamp() AT TIME ZONE 'UTC' WHERE id=%s",[sub.id])
+    sub.invalidate_recordset(['write_date'])
+
+
 class SupplierResponse(models.Model):
     _name = RESPONSE
     _description = 'Supplier Decision on Submitted Revision'
@@ -130,10 +136,10 @@ class SupplierResponse(models.Model):
                 self.env['supplier.shortage.response.line'].create([dict(command[2],response_id=rec.id) for command in commands])
             rec._validate_scope()
             kind = {'email':'email','document':'letter','phone':'phone'}.get(rec.response_source,'note')
-            event = self.env['supplier.shortage.claim.communication']._append(sub,'inbound',kind,rec.response_summary,message)
-            super(ClaimCommunication,event).write({'partner_id':rec.supplier_contact_id.id,
-                'message_reference':message.message_id if message else False})
+            event = self.env['supplier.shortage.claim.communication']._append(sub,'inbound',kind,rec.response_summary,message,
+                partner=rec.supplier_contact_id,source_reference=message.message_id if message else False)
             rec._set({'communication_id':event.id})
+            version_submission(sub)
             sub._audit('Supplier response %s recorded, unverified; no recovery.' % rec.id,rec.response_summary)
             result |= rec
         return result
@@ -225,8 +231,7 @@ class SupplierResponse(models.Model):
             self._set({'current_key':str(sub.id)})
         self._set({'verification_state':'verified','verified_by':self.env.uid,'verified_at':fields.Datetime.now()})
         # Version the parent: stale Repeatable Read transactions must retry.
-        self.env.cr.execute("UPDATE supplier_shortage_claim_submission SET write_date=clock_timestamp() AT TIME ZONE 'UTC' WHERE id=%s",[sub.id])
-        sub.invalidate_recordset(['write_date'])
+        version_submission(sub)
         sub._audit('Response %s verified; prior position %s. Accepted %s, rejected %s, disputed %s, pending %s; recovery unchanged.' %
                    (self.id,old.id or '-',self.accepted_amount,self.rejected_amount,self.disputed_amount,self.pending_amount),self.verification_note)
         return True

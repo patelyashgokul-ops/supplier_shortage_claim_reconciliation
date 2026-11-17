@@ -5,7 +5,7 @@ from odoo.exceptions import AccessError, ValidationError
 from odoo.fields import Domain
 from .claim_preparation import ROLE
 from .claim_submission import SUBMISSION
-from .supplier_response import RESPONSE, authority, current_submission
+from .supplier_response import RESPONSE, authority, current_submission, version_submission
 
 
 class SupplierCaseBase(models.AbstractModel):
@@ -94,6 +94,7 @@ class Negotiation(models.Model):
                 if rec.supersedes_event_id.submission_id != rec.submission_id or rec.supersedes_event_id.negotiation_type == 'counteroffer':
                     raise ValidationError('A revised supplier offer must reference an earlier supplier position in this revision.')
             rec.submission_id._audit('Negotiation event %s: %s %s %s. Proposal only; no acceptance or recovery.' % (rec.id,rec.negotiation_type,rec.proposed_amount,rec.currency_id.name),rec.description)
+            version_submission(rec.submission_id)
         return records
 
     def write(self, values):
@@ -203,6 +204,7 @@ class Commitment(models.Model):
                     raise ValidationError('Revise only a current promise on this revision.')
                 super(Commitment,old).write({'status':'revised'})
             rec.submission_id._audit('Supplier commitment %s recorded. Promise only; not verified settlement.' % rec.id,rec.description)
+            version_submission(rec.submission_id)
         return records
 
     def write(self, values):
@@ -276,6 +278,7 @@ class Dispute(models.Model):
         for rec in records:
             rec._validate_scope(); rec._validate_case()
             rec.submission_id._audit('Dispute %s opened for line %s, assigned to user %s.' % (rec.id,rec.claim_line_id.id or '-',rec.assigned_user_id.id),rec.description)
+            version_submission(rec.submission_id)
         return records
 
     def _validate_case(self):

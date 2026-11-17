@@ -44,7 +44,7 @@ class ClaimSupplierPosition(models.Model):
         disputes=self.env['supplier.shortage.claim.dispute'].search([('claim_id','in',self.ids),('dispute_state','not in',('resolved','closed'))])
         hidden=Domain('id','in',self.ids)
         hidden &= Domain.OR([Domain(f,'any!',~Domain('id','access','read')) for f in ('response_ids','dispute_ids','negotiation_ids','commitment_ids')])
-        if self.search_count(hidden):
+        if self.search_count(Domain(list(hidden),internal=True)):
             raise AccessError('Supplier position is unavailable because some underlying decision records are restricted.')
         by_claim={c.id:dict(sub=[],response=[],offer=[],promise=[],dispute=[]) for c in self}
         for kind,records in [('sub',submissions),('response',responses),('offer',offers),('promise',promises),('dispute',disputes)]:
