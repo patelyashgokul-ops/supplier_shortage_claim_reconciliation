@@ -90,3 +90,26 @@ supplier_manage_wizard,supplier communication management,supplier.shortage.submi
 submission_attachment_read,private supplier snapshot access,ir.attachment,,r,"['|',('res_model','!=','supplier.shortage.claim.submission'),('res_access_read','=',True)]"
 submission_dispatch_scope,dispatch guard company restriction,supplier.shortage.dispatch.attempt,,crud,"[('company_key','in',company_ids)]"
 submission_dispatch_admin,dispatch technical diagnostics,supplier.shortage.dispatch.attempt,base.group_system,r,
+response_company,response revision and company,supplier.shortage.claim.response,,crud,"[('company_id','in',company_ids),('submission_id','access','read')]"
+response_user,response recording,supplier.shortage.claim.response,group_claim_user,cru,
+response_accounts,response accounts visibility,supplier.shortage.claim.response,group_accounts_reviewer,r,
+response_finance,response finance decisions,supplier.shortage.claim.response,group_finance_manager,cru,
+response_line_company,response line isolation,supplier.shortage.response.line,,crud,"[('company_id','in',company_ids),('response_id','access','read')]"
+response_line_user,response line recording,supplier.shortage.response.line,group_claim_user,cr,
+response_line_accounts,response line accounts visibility,supplier.shortage.response.line,group_accounts_reviewer,r,
+response_line_finance,response line finance visibility,supplier.shortage.response.line,group_finance_manager,cr,
+response_reason_read,response reason visibility,supplier.shortage.response.reason,base.group_user,r,
+response_reason_config,response reason configuration,supplier.shortage.response.reason,group_module_admin,cru,
+negotiation_company,negotiation company,supplier.shortage.claim.negotiation,,crud,"[('company_id','in',company_ids),('submission_id','access','read')]"
+negotiation_user,negotiation recording,supplier.shortage.claim.negotiation,group_claim_user,cru,
+negotiation_accounts,negotiation financial review,supplier.shortage.claim.negotiation,group_accounts_reviewer,ru,
+negotiation_finance,negotiation finance authority,supplier.shortage.claim.negotiation,group_finance_manager,cru,
+commitment_company,commitment company,supplier.shortage.claim.commitment,,crud,"[('company_id','in',company_ids),('submission_id','access','read')]"
+commitment_user,commitment recording,supplier.shortage.claim.commitment,group_claim_user,cru,
+commitment_accounts,commitment financial visibility,supplier.shortage.claim.commitment,group_accounts_reviewer,r,
+commitment_finance,commitment finance authority,supplier.shortage.claim.commitment,group_finance_manager,cru,
+dispute_company,dispute company,supplier.shortage.claim.dispute,,crud,"[('company_id','in',company_ids),('submission_id','access','read')]"
+dispute_user,dispute visibility,supplier.shortage.claim.dispute,group_claim_user,r,
+dispute_manager,dispute management,supplier.shortage.claim.dispute,group_claim_manager,cru,
+dispute_accounts,dispute accounts visibility,supplier.shortage.claim.dispute,group_accounts_reviewer,r,
+dispute_finance,dispute finance authority,supplier.shortage.claim.dispute,group_finance_manager,cru,
