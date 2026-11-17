@@ -4,7 +4,8 @@ from odoo import api, fields, models
 from odoo.fields import Domain
 from odoo.exceptions import AccessError, ValidationError
 from .claim_preparation import ROLE
-from .claim_submission import SUBMISSION, email_address
+from .claim_submission import SUBMISSION, email_address, ClaimCommunication
+from .evidence_verification import digest
 
 RESPONSE = 'supplier.shortage.claim.response'
 
@@ -18,6 +19,19 @@ def authority(record, manager=False):
     roles = ('group_claim_manager', 'group_finance_manager') if manager else ('group_claim_user', 'group_finance_manager')
     if not any(record.env.user.has_group(ROLE + role) for role in roles):
         raise AccessError('Supplier response authority is required.')
+
+
+def current_submission(sub):
+    """Revalidate approval without conferring or requiring outbound email authority."""
+    claim=sub.claim_id
+    cycle=sub.approval_id
+    if sub.state!='sent' or sub.superseded or cycle.state!='approved' or claim.approval_status!='approved' or cycle.number!=claim.approval_cycle:
+        raise ValidationError('This response needs the current approved submitted revision; obtain reapproval and supplier confirmation.')
+    claim._approval_ready()
+    if digest(claim._approval_basis())!=cycle.fingerprint:
+        raise ValidationError('The submitted approval basis changed; revalidate before accepting supplier decisions.')
+    if cycle.snapshot['policy']['approval_chain']=='finance' and not sub.env.user.has_group(ROLE+'group_finance_manager'):
+        raise AccessError('This approved scope requires Finance verification authority.')
 
 
 class SupplierResponse(models.Model):
@@ -108,6 +122,8 @@ class SupplierResponse(models.Model):
             rec._validate_scope()
             kind = {'email':'email','document':'letter','phone':'phone'}.get(rec.response_source,'note')
             event = self.env['supplier.shortage.claim.communication']._append(sub,'inbound',kind,rec.response_summary,message)
+            super(ClaimCommunication,event).write({'partner_id':rec.supplier_contact_id.id,
+                'message_reference':message.message_id if message else False})
             rec._set({'communication_id':event.id})
             sub._audit('Supplier response %s recorded, unverified; no recovery.' % rec.id,rec.response_summary)
             result |= rec
@@ -165,7 +181,7 @@ class SupplierResponse(models.Model):
             raise ValidationError('An independent reviewer and substantive verification note are required.')
         sub = self.submission_id
         # Preserve STEP 12 approval authority and material-change revalidation.
-        sub._current()
+        current_submission(sub)
         if self.response_source == 'email':
             msg = self.source_message_id
             if not msg or msg.message_type != 'email' or msg.model != SUBMISSION or msg.res_id != sub.id or not sub.message_id or msg.parent_id != sub.message_id:
@@ -190,7 +206,10 @@ class SupplierResponse(models.Model):
             raise ValidationError('Rejection requires positive rejected quantity.')
         old = self.search([('current_key','=',str(sub.id))])
         if self.line_ids:
-            if old and sub.currency_id.compare_amounts(self.accepted_amount,old.accepted_amount)<0 and not self.env.user.has_group(ROLE+'group_finance_manager'):
+            previous={line.claim_line_id.id:line.accepted_qty for line in old.line_ids}
+            incoming={line.claim_line_id.id:line.accepted_qty for line in self.line_ids}
+            reduction=any(incoming.get(key,0)<qty for key,qty in previous.items())
+            if old and reduction and not self.env.user.has_group(ROLE+'group_finance_manager'):
                 raise AccessError('Reducing a verified acceptance requires Finance review.')
             if old:
                 old._set({'current_key':False,'verification_state':'superseded','superseded_by_id':self.id})

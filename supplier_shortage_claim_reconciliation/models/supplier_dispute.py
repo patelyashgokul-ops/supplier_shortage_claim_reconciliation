@@ -5,7 +5,7 @@ from odoo.exceptions import AccessError, ValidationError
 from odoo.fields import Domain
 from .claim_preparation import ROLE
 from .claim_submission import SUBMISSION
-from .supplier_response import RESPONSE, authority
+from .supplier_response import RESPONSE, authority, current_submission
 
 
 class SupplierCaseBase(models.AbstractModel):
@@ -19,7 +19,6 @@ class SupplierCaseBase(models.AbstractModel):
     supplier_id = fields.Many2one(related='submission_id.supplier_id')
     revision = fields.Integer(related='submission_id.revision')
     response_id = fields.Many2one(RESPONSE, check_company=True, ondelete='restrict')
-    evidence_ids = fields.Many2many('supplier.shortage.claim.evidence', check_company=True)
     description = fields.Text(required=True)
     recorded_by = fields.Many2one('res.users', readonly=True, ondelete='restrict')
     event_date = fields.Datetime(readonly=True)
@@ -134,7 +133,7 @@ class Negotiation(models.Model):
         # Cross-currency/tax comparison and concessions remain review-only until later settlement steps.
         if self.currency_id != self.submission_id.currency_id or self.tax_basis != 'untaxed':
             raise ValidationError('Currency/tax basis is incompatible. Record a normalized reviewed proposal; do not infer exchange rates or tax recovery.')
-        self.submission_id._current()
+        current_submission(self.submission_id)
         super(Negotiation,self).write({'status':'authorized','decided_by':self.env.uid,'decided_at':fields.Datetime.now()})
         self.submission_id._audit('Negotiation %s internally authorized as a proposal only; submitted claim and recovery unchanged.' % self.id,self.decision_note)
 
