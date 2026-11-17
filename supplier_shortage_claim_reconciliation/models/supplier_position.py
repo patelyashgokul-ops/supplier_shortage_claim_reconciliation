@@ -8,7 +8,7 @@ from .claim_submission import SUBMISSION
 POSITION_OUTPUTS={'response_ids','dispute_ids','negotiation_ids','commitment_ids','response_submission_id','latest_verified_response_id',
     'supplier_response_status','supplier_approved_amount','supplier_accepted_amount','supplier_rejected_amount','supplier_disputed_amount',
     'supplier_pending_amount','current_offer_id','promised_amount','supplier_financial_review','verified_recovery_amount','open_dispute_count',
-    'next_supplier_followup','last_supplier_response','supplier_days_since_submission','supplier_reply_target','supplier_reply_target_kind','last_supplier_communication'}
+    'next_supplier_followup','last_supplier_response','supplier_days_since_submission','supplier_reply_target','supplier_reply_target_kind','last_supplier_communication','supplier_position_currency_id'}
 
 
 class ClaimSupplierPosition(models.Model):
@@ -21,15 +21,16 @@ class ClaimSupplierPosition(models.Model):
     latest_verified_response_id = fields.Many2one(RESPONSE,compute='_supplier_position')
     supplier_response_status = fields.Selection([('pending','Awaiting Supplier'),('acknowledged','Acknowledged'),('accepted','Fully Accepted'),
         ('partial','Partially Accepted'),('rejected','Fully Rejected'),('mixed','Mixed / Disputed'),('review','Requires Revalidation')],compute='_supplier_position')
-    supplier_approved_amount = fields.Monetary(compute='_supplier_position',string='Submitted Approved Amount')
+    supplier_position_currency_id = fields.Many2one('res.currency',compute='_supplier_position',string='Submitted Position Currency')
+    supplier_approved_amount = fields.Monetary(compute='_supplier_position',currency_field='supplier_position_currency_id',string='Submitted Approved Amount')
     supplier_accepted_amount = fields.Float(compute='_supplier_position',digits=False,aggregator=False)
     supplier_rejected_amount = fields.Float(compute='_supplier_position',digits=False,aggregator=False)
     supplier_disputed_amount = fields.Float(compute='_supplier_position',digits=False,aggregator=False)
     supplier_pending_amount = fields.Float(compute='_supplier_position',digits=False,aggregator=False)
     current_offer_id = fields.Many2one('supplier.shortage.claim.negotiation',compute='_supplier_position')
-    promised_amount = fields.Monetary(compute='_supplier_position',help='One unambiguous current promise in claim currency. Multiple potentially overlapping promises require review and are not added.')
+    promised_amount = fields.Monetary(compute='_supplier_position',currency_field='supplier_position_currency_id',help='One unambiguous current promise in submitted currency. Multiple potentially overlapping promises require review and are not added.')
     supplier_financial_review = fields.Boolean(compute='_supplier_position')
-    verified_recovery_amount = fields.Monetary(compute='_supplier_position',help='No verified settlement allocation source exists in Step 14; recovery remains zero.')
+    verified_recovery_amount = fields.Monetary(compute='_supplier_position',currency_field='supplier_position_currency_id',help='No verified settlement allocation source exists in Step 14; recovery remains zero.')
     open_dispute_count = fields.Integer(compute='_supplier_position')
     next_supplier_followup = fields.Date(compute='_supplier_position')
     last_supplier_response = fields.Datetime(compute='_supplier_position')
@@ -43,7 +44,7 @@ class ClaimSupplierPosition(models.Model):
         'response_ids.line_ids.rejected_qty','response_ids.line_ids.disputed_qty','negotiation_ids.status',
         'negotiation_ids.proposed_amount','commitment_ids.status','commitment_ids.committed_amount',
         'dispute_ids.dispute_state','dispute_ids.next_action_date','dispute_ids.contractual_deadline',
-        'approval_status','approval_cycle','communication_ids.communication_date')
+        'approval_status','approval_cycle','communication_ids.communication_date','currency_id')
     @api.depends_context('uid','allowed_company_ids')
     def _supplier_position(self):
         # Batch searches, native access domains and prefetch. Never elevate financial reads.
@@ -77,6 +78,7 @@ class ClaimSupplierPosition(models.Model):
             pos=current[0] if current else self.env[RESPONSE]
             claim.response_submission_id=sub
             claim.latest_verified_response_id=verified[0] if verified else False
+            claim.supplier_position_currency_id=sub.currency_id if sub else claim.currency_id
             amount=sub.amount if sub else 0
             claim.supplier_approved_amount=amount
             claim.supplier_accepted_amount=pos.accepted_amount if pos else 0
@@ -94,7 +96,7 @@ class ClaimSupplierPosition(models.Model):
             claim.current_offer_id=supplier_offers[0] if supplier_offers else False
             same_currency=[p for p in rows['promise'] if p.submission_id==sub and p.currency_id==sub.currency_id]
             claim.promised_amount=same_currency[0].committed_amount if len(same_currency)==1 else 0
-            claim.supplier_financial_review=bool(pos and pos.financial_review_required) or len(same_currency)>1 or any(o.financial_review_required for o in supplier_offers[:1]) or any(p.currency_id!=sub.currency_id for p in rows['promise'] if p.submission_id==sub)
+            claim.supplier_financial_review=bool(sub and claim.currency_id!=sub.currency_id) or bool(pos and pos.financial_review_required) or len(same_currency)>1 or any(o.financial_review_required for o in supplier_offers[:1]) or any(p.currency_id!=sub.currency_id for p in rows['promise'] if p.submission_id==sub)
             claim.open_dispute_count=len(rows['dispute'])
             dates=[d.next_action_date for d in rows['dispute'] if d.next_action_date]
             claim.next_supplier_followup=min(dates) if dates else False

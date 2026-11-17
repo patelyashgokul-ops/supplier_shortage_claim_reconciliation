@@ -556,3 +556,20 @@ class TestSupplierResponse(SupplierSubmissionCase):
         self.assertEqual(rec.pending_amount,20000)
         self.assertEqual(rec.rejected_amount,0)
         self.assertEqual(claim.with_user(self.sender).supplier_response_status,'partial')
+
+    def test_historical_position_keeps_submission_currency_after_source_correction(self):
+        response=self._response(12); self._verify(response)
+        source_currency=self.sub.currency_id
+        foreign=self.env['res.currency'].with_context(active_test=False).search([('id','!=',source_currency.id)],limit=1)
+        foreign.active=True
+        managed=self.claim.with_user(self.sender)
+        managed.action_start_approval_correction('External purchase currency correction requires a new approval and submitted scope.')
+        # Explicit external source-change fixture; response methods must never perform this write.
+        self.claim.purchase_id.currency_id=foreign
+        self.assertEqual(managed.currency_id,foreign)
+        self.assertEqual(managed.supplier_position_currency_id,source_currency)
+        self.assertEqual(managed.supplier_accepted_amount,12000)
+        self.assertTrue(managed.supplier_financial_review)
+        self.assertEqual(managed.supplier_response_status,'review')
+        self.assertEqual(self.sub.currency_id,source_currency)
+        self.assertEqual(managed.verified_recovery_amount,0)
