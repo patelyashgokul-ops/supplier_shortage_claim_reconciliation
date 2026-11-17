@@ -314,6 +314,12 @@ class ResponseLine(models.Model):
         for value in values:
             if set(value)-allowed:
                 raise AccessError('Submitted quantities and monetary attribution come from the frozen revision.')
+            try:
+                valid=all(math.isfinite(float(value.get(f,0))) and float(value.get(f,0))>=0 for f in ('accepted_qty','rejected_qty','disputed_qty'))
+            except (TypeError,ValueError,OverflowError):
+                valid=False
+            if not valid:
+                raise ValidationError('Position quantities must be finite and nonnegative.')
             parent = self.env[RESPONSE].browse(value.get('response_id'))
             authority(parent); parent.submission_id._lock()
             if parent.verification_state != 'unverified' or parent.communication_id:

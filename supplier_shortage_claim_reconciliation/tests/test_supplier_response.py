@@ -3,6 +3,8 @@ from datetime import timedelta
 from odoo import Command, fields
 from odoo.exceptions import AccessError, ValidationError
 from odoo.tests import Form
+from odoo.tests.common import new_test_user
+from odoo.addons.supplier_shortage_claim_reconciliation.models.submission_mail import MAIL_CAPABILITY
 from .test_supplier_submission import SupplierSubmissionCase, M, SUB
 from .preparation_fixtures import verify_document
 
@@ -17,6 +19,7 @@ class TestSupplierResponse(SupplierSubmissionCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+        cls.preparer=new_test_user(cls.env,login='ssc_response_preparer',groups=M+'group_claim_user,purchase.group_purchase_user,stock.group_stock_manager,account.group_account_readonly',company_id=cls.company.id,company_ids=[Command.set(cls.company.ids)])
         fixture=cls('test_unverified_does_not_affect_summary')
         cls.common_claim,cls.common_evidence,cls.common_sub,cls.common_wizard=fixture._queued()
         fixture.assertEqual(fixture._send_mocked(cls.common_sub),1)
@@ -40,7 +43,7 @@ class TestSupplierResponse(SupplierSubmissionCase):
         super().setUp()
         self.claim,self.evidence,self.sub,self.wizard=self.common_claim,self.common_evidence,self.common_sub,self.common_wizard
         self.reason=self.common_reason
-        self.Response=self.env[R].with_user(self.user)
+        self.Response=self.env[R].with_user(self.preparer)
         self.Negotiation=self.env[N].with_user(self.user)
         self.Commitment=self.env[C].with_user(self.user)
         self.Dispute=self.env[D].with_user(self.sender)
@@ -100,7 +103,7 @@ class TestSupplierResponse(SupplierSubmissionCase):
         self.assertFalse(rec.current_key)
         self.assertEqual(self._fresh_claim().supplier_accepted_amount,0)
         self.assertEqual(self._fresh_claim().supplier_pending_amount,20000)
-        self.assertEqual(rec.reported_by,self.user)
+        self.assertEqual(rec.reported_by,self.preparer)
         self.assertEqual(rec.communication_id.submission_id,self.sub)
 
     def test_partial_20_12_8_reconciles(self):
@@ -233,8 +236,13 @@ class TestSupplierResponse(SupplierSubmissionCase):
         return evidence
 
     def _email(self, sender=None, parent=None):
-        return self.env['mail.message'].create({'model':SUB,'res_id':self.sub.id,'message_type':'email','email_from':sender or self.supplier.email,
-            'parent_id':(parent or self.sub.message_id).id,'subject':'Supplier decision response','body':'Supplier response is evidence only.'})
+        # Simulate a trusted native intake, never enable a public RPC bypass.
+        token=MAIL_CAPABILITY.set(True)
+        try:
+            return self.env['mail.message'].create({'model':SUB,'res_id':self.sub.id,'message_type':'email','email_from':sender or self.supplier.email,
+                'parent_id':(parent or self.sub.message_id).id,'subject':'Supplier decision response','body':'Supplier response is evidence only.'})
+        finally:
+            MAIL_CAPABILITY.reset(token)
 
     def test_native_email_traceability_duplicate_and_no_auto_acceptance(self):
         msg=self._email()
@@ -373,9 +381,9 @@ class TestSupplierResponse(SupplierSubmissionCase):
     def test_dispute_unauthorized_edits_and_resolution_denied(self):
         dispute=self._dispute()
         for method in ('action_resolve','action_escalate'):
-            with self.assertRaises(AccessError),self.cr.savepoint(): getattr(dispute.with_user(self.user),method)()
+            with self.assertRaises(AccessError),self.cr.savepoint(): getattr(dispute.with_user(self.preparer),method)()
         with self.assertRaises(AccessError),self.cr.savepoint(): dispute.write({'dispute_state':'closed'})
-        with self.assertRaises(AccessError),self.cr.savepoint(): dispute.with_user(self.user).write({'assigned_user_id':self.user.id})
+        with self.assertRaises(AccessError),self.cr.savepoint(): dispute.with_user(self.preparer).write({'assigned_user_id':self.preparer.id})
 
     def test_failed_verification_no_false_success_audit(self):
         rec=self._response(20,response_source='document')

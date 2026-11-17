@@ -300,7 +300,14 @@ class Dispute(models.Model):
             authority(rec,True); rec.submission_id._lock()
             if rec.dispute_state=='closed':
                 raise AccessError('Closed dispute history is immutable.')
-        changed=self.filtered(lambda r:any(r[f] != v for f,v in values.items()))
+        def differs(rec):
+            for field,value in values.items():
+                current=rec[field].id if rec._fields[field].type=='many2one' else rec[field]
+                incoming=rec._fields[field].convert_to_cache(value,rec)
+                if current!=incoming:
+                    return True
+            return False
+        changed=self.filtered(differs)
         old={r.id:{f:str(r[f]) for f in values} for r in changed}
         result=super().write(values)
         self._validate_case()
