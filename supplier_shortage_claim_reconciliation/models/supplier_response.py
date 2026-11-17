@@ -46,7 +46,7 @@ class SupplierResponse(models.Model):
     communication_id = fields.Many2one('supplier.shortage.claim.communication', readonly=True, ondelete='restrict')
     source_message_id = fields.Many2one('mail.message', ondelete='restrict')
     source_key = fields.Char(readonly=True, index=True)
-    evidence_ids = fields.Many2many('supplier.shortage.claim.evidence', check_company=True)
+    evidence_ids = fields.Many2many('supplier.shortage.claim.evidence', 'ssc_response_evidence_rel', 'response_id', 'evidence_id', check_company=True)
     line_ids = fields.One2many('supplier.shortage.response.line', 'response_id', copy=False)
     reported_by = fields.Many2one('res.users', readonly=True, ondelete='restrict')
     reported_at = fields.Datetime(readonly=True)

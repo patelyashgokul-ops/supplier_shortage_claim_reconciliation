@@ -124,7 +124,7 @@ class AdvancedEvidence(models.Model):
                 self.check_access('create')
                 target=self.env['supplier.shortage.claim'].browse(vals.get('claim_id',self.env.context.get('default_claim_id')))
                 target.check_access('read')
-                if not target or target.state!='draft':
+                if not target or (target.state!='draft' and not vals.get('supplier_response_submission_id')):
                     raise ValidationError(self.env._('Select an accessible draft claim before uploading evidence.'))
                 if vals.get('upload_data'):
                     vals['upload_data']=self._encoded_upload(vals['upload_data'],target.company_id.ssc_evidence_max_mb*1024*1024)
@@ -250,7 +250,7 @@ class AdvancedEvidence(models.Model):
             lock_records(self.claim_id)
             lock_records(self)
             self.invalidate_recordset()
-            if any(rec.claim_id.state!='draft' or not rec.is_current or len((rec.verification_note or '').strip())<10 for rec in self):
+            if any((rec.claim_id.state!='draft' and not rec.supplier_response_submission_id) or not rec.is_current or len((rec.verification_note or '').strip())<10 for rec in self):
                 raise ValidationError(self.env._('Review only current draft evidence with a substantive conclusion.'))
             if target=='verified' and any(rec.create_uid==self.env.user for rec in self):
                 raise AccessError(self.env._('An independent checker must verify evidence; uploaders cannot approve their own documents.'))

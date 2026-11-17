@@ -104,7 +104,7 @@ class EvidenceReadiness(models.Model):
         rules=self.env['supplier.shortage.evidence.requirement'].search([('company_id','in',self.company_id.ids),('active','=',True)])
         exceptions=self.env['supplier.shortage.evidence.exception'].search([('claim_id','in',self.ids),('state','=','approved')])
         for claim in self:
-            evidence=claim.evidence_ids
+            evidence=claim.evidence_ids.filtered(lambda e:not e.supplier_response_submission_id)
             if _coverage_search(claim,[('id','=',claim.id),('evidence_ids','any!',['!',('id','access','read')])]):
                 raise AccessError(self.env._('Evidence visibility is incomplete; hidden records are not interpreted as missing.'))
             evidence.check_access('read')

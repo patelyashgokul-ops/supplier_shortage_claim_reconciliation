@@ -327,7 +327,7 @@ class InternalClaimApproval(models.Model):
             raise ValidationError('Submit the claim for evidence review first.')
         self._validate_for_review()
         self.claim_line_ids._check_submitted_purchase_source()
-        if any(e.effective_state!='verified' for e in self.evidence_ids.filtered('is_current')):
+        if any(e.effective_state!='verified' for e in self.evidence_ids.filtered(lambda e:e.is_current and not e.supplier_response_submission_id)):
             raise ValidationError('All current supporting evidence must be verified.')
 
     def _financial_basis(self):
@@ -387,7 +387,7 @@ class InternalClaimApproval(models.Model):
             'currency':self.currency_id.id,'financial_lines':basis,'reviewer':self.financial_reviewer_id.id,
             'reviewed_at':str(self.financial_reviewed_at),'readiness':self.readiness_fingerprint,
             'evidence':[{'id':e.id,'state':e.effective_state,'uploader':e.create_uid.id,'verifier':e.verified_by.id,
-                'verified_at':str(e.verified_at),'fingerprint':e.reviewed_fingerprint} for e in self.evidence_ids.filtered('is_current').sorted('id')],
+                'verified_at':str(e.verified_at),'fingerprint':e.reviewed_fingerprint} for e in self.evidence_ids.filtered(lambda e:e.is_current and not e.supplier_response_submission_id).sorted('id')],
             'warehouse':[{'id':o.id,'recorder':o.recorded_by.id,'verifier':o.verified_by.id,'verified_at':str(o.verified_at),
                 'fingerprint':o.reviewed_fingerprint} for o in self.warehouse_observation_ids.filtered('is_current').sorted('id')],
             'maker':self.create_uid.id,'preparer':self.user_id.id,'submitted_by':self.review_requested_by.id}

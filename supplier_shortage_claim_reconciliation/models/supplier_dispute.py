@@ -56,13 +56,14 @@ class Negotiation(models.Model):
     _description = 'Supplier Negotiation Event'
     _order = 'id desc'
     _rec_name = 'description'
+    evidence_ids = fields.Many2many('supplier.shortage.claim.evidence', 'ssc_neg_evidence_rel', 'negotiation_id', 'evidence_id', check_company=True)
     negotiation_type = fields.Selection([('supplier_offer','Supplier Offer'),('counteroffer','Company Counteroffer'),
         ('revised','Supplier Revised Offer'),('company_response','Company Response'),('final','Supplier Final Position')], required=True)
     proposed_amount = fields.Monetary(required=True)
     currency_id = fields.Many2one('res.currency', required=True, ondelete='restrict')
     tax_basis = fields.Selection([('untaxed','Untaxed'),('inclusive','Tax Inclusive'),('unknown','Unspecified')], required=True, default='unknown')
     financial_review_required = fields.Boolean(compute='_review_required')
-    claim_line_ids = fields.Many2many('supplier.shortage.claim.line', check_company=True)
+    claim_line_ids = fields.Many2many('supplier.shortage.claim.line', 'ssc_neg_line_rel', 'negotiation_id', 'line_id', check_company=True)
     supersedes_event_id = fields.Many2one('supplier.shortage.claim.negotiation', check_company=True, ondelete='restrict')
     status = fields.Selection([('proposed','Proposed'),('accounts','Accounts Reviewed'),('authorized','Internally Authorized Proposal'),('declined','Declined')], readonly=True, default='proposed', required=True)
     accounts_by = fields.Many2one('res.users', readonly=True, ondelete='restrict')
@@ -100,7 +101,9 @@ class Negotiation(models.Model):
         if set(values) != {'decision_note'}:
             raise AccessError('Negotiation terms are immutable; record a revised event.')
         for rec in self:
-            authority(rec,True); rec.submission_id._lock()
+            rec.check_access('write'); rec._validate_scope_read(); rec.submission_id._lock()
+            if self.env.su or not any(self.env.user.has_group(ROLE+g) for g in ('group_claim_manager','group_accounts_reviewer','group_finance_manager')):
+                raise AccessError('A commercial or financial reviewer must record the decision note.')
             if rec.status not in ('proposed','accounts'):
                 raise AccessError('Final decision notes are immutable.')
         return super().write(values)
@@ -149,6 +152,7 @@ class Commitment(models.Model):
     _description = 'Supplier Promise (Not a Settlement)'
     _rec_name = 'description'
     _order = 'id desc'
+    evidence_ids = fields.Many2many('supplier.shortage.claim.evidence', 'ssc_commit_evidence_rel', 'commitment_id', 'evidence_id', check_company=True)
     commitment_type = fields.Selection([('credit','Issue Vendor Credit'),('replacement','Send Replacement'),('refund','Process Refund'),
         ('evidence','Provide Evidence'),('delivery','Confirm Delivery'),('response','Respond'),('reconsider','Reconsider Rejection')], required=True)
     committed_amount = fields.Monetary()
@@ -233,6 +237,7 @@ class Dispute(models.Model):
     _description = 'Supplier Dispute Case'
     _rec_name = 'issue_reference'
     _order = 'priority desc, next_action_date, id desc'
+    evidence_ids = fields.Many2many('supplier.shortage.claim.evidence', 'ssc_dispute_evidence_rel', 'dispute_id', 'evidence_id', check_company=True)
     issue_reference = fields.Char(required=True, help='Stable issue reference, unique while active within a submitted revision.')
     claim_line_id = fields.Many2one('supplier.shortage.claim.line', check_company=True, ondelete='restrict')
     assigned_user_id = fields.Many2one('res.users', required=True, default=lambda s:s.env.user, check_company=True)
