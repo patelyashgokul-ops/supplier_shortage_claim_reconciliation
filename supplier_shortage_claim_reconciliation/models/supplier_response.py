@@ -324,7 +324,7 @@ class ResponseLine(models.Model):
     @api.depends('accepted_qty','rejected_qty','disputed_qty','response_id.submission_id','claim_line_id')
     def _amounts(self):
         for row in self:
-            snap = row._snapshot() if row.response_id and row.claim_line_id else {}
+            snap = row._snapshot() if row.response_id.submission_id and row.claim_line_id else {}
             qty = snap.get('quantity',0)
             row.submitted_qty = qty
             row.product_uom_id = snap.get('uom_id')
