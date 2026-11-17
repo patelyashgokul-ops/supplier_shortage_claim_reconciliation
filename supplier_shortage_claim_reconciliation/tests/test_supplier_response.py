@@ -30,12 +30,12 @@ class TestSupplierResponse(SupplierSubmissionCase):
 
     def _order(self, *args, **kwargs):
         order=super()._order(*args,**kwargs)
-        order.order_line.price_unit=1000
+        order.order_line.price_unit=getattr(self,'test_unit_value',1000)
         return order
 
     def _bill(self, lines, posted=False, **kwargs):
         bill=super()._bill(lines,False,**kwargs)
-        bill.invoice_line_ids.price_unit=1000
+        bill.invoice_line_ids.price_unit=getattr(self,'test_unit_value',1000)
         if posted: bill.action_post()
         return bill
 
@@ -532,3 +532,13 @@ class TestSupplierResponse(SupplierSubmissionCase):
             commitment.description='Supplier promises a future credit note; the original accounting settlement source has not been received.'
         self.assertEqual(commitment.record.status,'promised')
         self.assertEqual(self._fresh_claim().verified_recovery_amount,0)
+
+    def test_minor_currency_rounding_requires_review_without_balancing(self):
+        self.test_unit_value=.33333
+        claim,_,sub,_=self._queued(); self._send_mocked(sub)
+        rec=self._response(1,rejected=1,disputed=18,sub=sub); self._verify(rec)
+        self.assertTrue(rec.financial_review_required)
+        self.assertEqual(rec.line_ids.pending_qty,0)
+        self.assertAlmostEqual(rec.accepted_amount+rec.rejected_amount+rec.disputed_amount,sub.amount)
+        self.assertTrue(claim.with_user(self.sender).supplier_financial_review)
+        self.assertEqual(claim.with_user(self.sender).verified_recovery_amount,0)

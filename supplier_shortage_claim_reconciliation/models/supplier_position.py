@@ -97,7 +97,7 @@ class ClaimSupplierPosition(models.Model):
             claim.current_offer_id=supplier_offers[0] if supplier_offers else False
             same_currency=[p for p in rows['promise'] if p.submission_id==sub and p.currency_id==sub.currency_id]
             claim.promised_amount=same_currency[0].committed_amount if len(same_currency)==1 else 0
-            claim.supplier_financial_review=len(same_currency)>1 or any(o.financial_review_required for o in supplier_offers[:1]) or any(p.currency_id!=sub.currency_id for p in rows['promise'] if p.submission_id==sub)
+            claim.supplier_financial_review=bool(pos and pos.financial_review_required) or len(same_currency)>1 or any(o.financial_review_required for o in supplier_offers[:1]) or any(p.currency_id!=sub.currency_id for p in rows['promise'] if p.submission_id==sub)
             claim.open_dispute_count=len(rows['dispute'])
             dates=[d.next_action_date for d in rows['dispute'] if d.next_action_date]
             claim.next_supplier_followup=min(dates) if dates else False

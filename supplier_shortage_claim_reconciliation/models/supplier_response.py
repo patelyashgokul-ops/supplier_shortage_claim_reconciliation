@@ -81,6 +81,7 @@ class SupplierResponse(models.Model):
     rejected_amount = fields.Monetary(compute='_positions')
     disputed_amount = fields.Monetary(compute='_positions')
     pending_amount = fields.Monetary(compute='_positions')
+    financial_review_required = fields.Boolean(compute='_positions', help='Currency presentation rounding cannot reconcile the proportional positions; Accounts review is required, never an invented balancing allocation.')
     _source_unique = models.Constraint('UNIQUE(company_id, source_key)', 'This source message already has a response.')
     _current_unique = models.Constraint('UNIQUE(current_key)', 'Only one current position may cover a submitted revision.')
 
@@ -94,6 +95,8 @@ class SupplierResponse(models.Model):
             rec.rejected_amount = sum(rec.line_ids.mapped('rejected_amount'))
             rec.disputed_amount = sum(rec.line_ids.mapped('disputed_amount'))
             rec.pending_amount = rec.approved_amount - rec.accepted_amount - rec.rejected_amount - rec.disputed_amount
+            displayed=sum(rec.currency_id.round(v) for v in (rec.accepted_amount,rec.rejected_amount,rec.disputed_amount,rec.pending_amount)) if rec.currency_id else 0
+            rec.financial_review_required=bool(rec.currency_id and rec.currency_id.compare_amounts(displayed,rec.approved_amount))
             rec.position_kind = 'accepted' if rec.approved_amount and rec.currency_id.is_zero(rec.approved_amount-rec.accepted_amount) else 'partial' if rec.accepted_amount>0 else 'rejected' if rec.approved_amount and rec.currency_id.is_zero(rec.approved_amount-rec.rejected_amount) else 'mixed'
 
     @api.model_create_multi
