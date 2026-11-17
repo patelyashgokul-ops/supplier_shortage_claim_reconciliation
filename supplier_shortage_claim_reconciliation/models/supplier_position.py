@@ -8,7 +8,7 @@ from .claim_submission import SUBMISSION
 POSITION_OUTPUTS={'response_ids','dispute_ids','negotiation_ids','commitment_ids','response_submission_id','latest_verified_response_id',
     'supplier_response_status','supplier_approved_amount','supplier_accepted_amount','supplier_rejected_amount','supplier_disputed_amount',
     'supplier_pending_amount','current_offer_id','promised_amount','supplier_financial_review','verified_recovery_amount','open_dispute_count',
-    'next_supplier_followup','last_supplier_response'}
+    'next_supplier_followup','last_supplier_response','supplier_days_since_submission','supplier_reply_target','supplier_reply_target_kind','last_supplier_communication'}
 
 
 class ClaimSupplierPosition(models.Model):
@@ -33,7 +33,17 @@ class ClaimSupplierPosition(models.Model):
     open_dispute_count = fields.Integer(compute='_supplier_position')
     next_supplier_followup = fields.Date(compute='_supplier_position')
     last_supplier_response = fields.Datetime(compute='_supplier_position')
+    supplier_days_since_submission = fields.Integer(compute='_supplier_position',string='Calendar Days Since Submission')
+    supplier_reply_target = fields.Date(compute='_supplier_position')
+    supplier_reply_target_kind = fields.Char(compute='_supplier_position')
+    last_supplier_communication = fields.Datetime(compute='_supplier_position')
 
+    @api.depends('submission_ids.state','submission_ids.superseded','submission_ids.sent_at',
+        'response_ids.verification_state','response_ids.current_key','response_ids.line_ids.accepted_qty',
+        'response_ids.line_ids.rejected_qty','response_ids.line_ids.disputed_qty','negotiation_ids.status',
+        'negotiation_ids.proposed_amount','commitment_ids.status','commitment_ids.committed_amount',
+        'dispute_ids.dispute_state','dispute_ids.next_action_date','dispute_ids.contractual_deadline',
+        'approval_status','approval_cycle','communication_ids.communication_date')
     @api.depends_context('uid','allowed_company_ids')
     def _supplier_position(self):
         # Batch searches, native access domains and prefetch. Never elevate financial reads.
@@ -42,6 +52,7 @@ class ClaimSupplierPosition(models.Model):
         offers=self.env['supplier.shortage.claim.negotiation'].search([('claim_id','in',self.ids)],order='id desc')
         promises=self.env['supplier.shortage.claim.commitment'].search([('claim_id','in',self.ids),('status','in',('promised','pending'))])
         disputes=self.env['supplier.shortage.claim.dispute'].search([('claim_id','in',self.ids),('dispute_state','not in',('resolved','closed'))])
+        communications=dict(self.env['supplier.shortage.claim.communication']._read_group([('claim_id','in',self.ids)],['claim_id'],['communication_date:max']))
         self.check_access('read')
         # Completeness probe only: already-authorized parent IDs and a boolean,
         # no hidden document identity, count or value leaves this method. A deeply
@@ -90,6 +101,11 @@ class ClaimSupplierPosition(models.Model):
             dates=[d.next_action_date for d in rows['dispute'] if d.next_action_date]
             claim.next_supplier_followup=min(dates) if dates else False
             claim.last_supplier_response=rows['response'][0].response_date if rows['response'] else False
+            claim.supplier_days_since_submission=max(0,(fields.Date.today()-fields.Date.to_date(sub.sent_at)).days) if sub and sub.sent_at else 0
+            contractual=[d.contractual_deadline for d in rows['dispute'] if d.submission_id==sub and d.contractual_deadline]
+            claim.supplier_reply_target=min(contractual) if contractual else claim.next_supplier_followup
+            claim.supplier_reply_target_kind='Contractual date (documented calendar basis)' if contractual else 'Internal follow-up target' if claim.next_supplier_followup else 'No deadline established'
+            claim.last_supplier_communication=communications.get(claim,False)
 
     @api.model_create_multi
     def create(self, values):
