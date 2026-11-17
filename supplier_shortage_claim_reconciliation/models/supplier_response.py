@@ -176,6 +176,8 @@ class SupplierResponse(models.Model):
             evidence.check_access('read')
             if evidence.claim_id != self.claim_id or evidence.company_id != self.company_id:
                 raise ValidationError('Response evidence must belong to this claim and company.')
+            if evidence.supplier_response_submission_id and evidence.supplier_response_submission_id!=self.submission_id:
+                raise ValidationError('Supplier evidence belongs to a different submitted revision.')
             if evidence.attachment_id:
                 evidence.attachment_id.check_access('read')
         self.line_ids._validate_position()
