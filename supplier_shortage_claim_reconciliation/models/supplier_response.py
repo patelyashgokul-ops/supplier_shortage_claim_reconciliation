@@ -106,7 +106,7 @@ class SupplierResponse(models.Model):
                 if row['line_id'] in positions else row['amount'] for row in snapshots)
             displayed=sum(rec.currency_id.round(v) for v in (rec.accepted_amount,rec.rejected_amount,rec.disputed_amount,rec.pending_amount)) if rec.currency_id else 0
             rec.financial_review_required=bool(rec.currency_id and rec.currency_id.compare_amounts(displayed,rec.approved_amount))
-            full=bool(snapshots) and len(positions)==len(snapshots)
+            full=bool(snapshots) and set(positions)=={row['line_id'] for row in snapshots}
             accepted=full and all(positions[row['line_id']].accepted_qty==row['quantity'] for row in snapshots)
             rejected=full and all(positions[row['line_id']].rejected_qty==row['quantity'] for row in snapshots)
             rec.position_kind='accepted' if accepted else 'partial' if any(rec.line_ids.mapped('accepted_qty')) else 'rejected' if rejected else 'mixed'

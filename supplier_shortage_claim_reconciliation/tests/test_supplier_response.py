@@ -542,6 +542,17 @@ class TestSupplierResponse(SupplierSubmissionCase):
         rec=self._response(1,rejected=1,disputed=18,sub=sub); self._verify(rec)
         self.assertTrue(rec.financial_review_required,(sub.amount,rec.accepted_amount,rec.rejected_amount,rec.disputed_amount,sub.currency_id.rounding))
         self.assertEqual(rec.line_ids.pending_qty,0)
+        self.assertEqual(rec.pending_amount,0)
         self.assertAlmostEqual(rec.accepted_amount+rec.rejected_amount+rec.disputed_amount,sub.amount)
+        self.assertAlmostEqual(rec.accepted_amount,sub.amount/rec.line_ids.submitted_qty)
         self.assertTrue(claim.with_user(self.sender).supplier_financial_review)
         self.assertEqual(claim.with_user(self.sender).verified_recovery_amount,0)
+
+    def test_omitted_submitted_line_remains_pending_on_original_basis(self):
+        claim,_,sub,_=self._queued(products=[self.product,self.second]); self._send_mocked(sub)
+        rec=self._response(20,sub=sub); self._verify(rec)
+        self.assertEqual(len(rec.line_ids),1)
+        self.assertEqual(rec.accepted_amount,20000)
+        self.assertEqual(rec.pending_amount,20000)
+        self.assertEqual(rec.rejected_amount,0)
+        self.assertEqual(claim.with_user(self.sender).supplier_response_status,'partial')
