@@ -22,10 +22,10 @@ class ClaimSupplierPosition(models.Model):
     supplier_response_status = fields.Selection([('pending','Awaiting Supplier'),('acknowledged','Acknowledged'),('accepted','Fully Accepted'),
         ('partial','Partially Accepted'),('rejected','Fully Rejected'),('mixed','Mixed / Disputed'),('review','Requires Revalidation')],compute='_supplier_position')
     supplier_approved_amount = fields.Monetary(compute='_supplier_position',string='Submitted Approved Amount')
-    supplier_accepted_amount = fields.Monetary(compute='_supplier_position')
-    supplier_rejected_amount = fields.Monetary(compute='_supplier_position')
-    supplier_disputed_amount = fields.Monetary(compute='_supplier_position')
-    supplier_pending_amount = fields.Monetary(compute='_supplier_position')
+    supplier_accepted_amount = fields.Float(compute='_supplier_position',digits=False,aggregator=False)
+    supplier_rejected_amount = fields.Float(compute='_supplier_position',digits=False,aggregator=False)
+    supplier_disputed_amount = fields.Float(compute='_supplier_position',digits=False,aggregator=False)
+    supplier_pending_amount = fields.Float(compute='_supplier_position',digits=False,aggregator=False)
     current_offer_id = fields.Many2one('supplier.shortage.claim.negotiation',compute='_supplier_position')
     promised_amount = fields.Monetary(compute='_supplier_position',help='One unambiguous current promise in claim currency. Multiple potentially overlapping promises require review and are not added.')
     supplier_financial_review = fields.Boolean(compute='_supplier_position')
@@ -87,10 +87,7 @@ class ClaimSupplierPosition(models.Model):
             status='pending'
             if verified: status='acknowledged'
             if pos:
-                if sub.currency_id.is_zero(amount-pos.accepted_amount): status='accepted'
-                elif pos.accepted_amount>0: status='partial'
-                elif sub.currency_id.is_zero(amount-pos.rejected_amount): status='rejected'
-                else: status='mixed'
+                status=pos.position_kind
             if sub and (sub.superseded or claim.approval_status!='approved' or sub.approval_id.number!=claim.approval_cycle): status='review'
             claim.supplier_response_status=status
             supplier_offers=[o for o in rows['offer'] if o.submission_id==sub and o.negotiation_type in ('supplier_offer','revised','final')]

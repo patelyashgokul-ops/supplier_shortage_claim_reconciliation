@@ -4,7 +4,7 @@ from odoo import api, fields, models
 from odoo.fields import Domain
 from odoo.exceptions import AccessError, ValidationError
 from .claim_preparation import ROLE
-from .claim_submission import SUBMISSION, email_address, ClaimCommunication
+from .claim_submission import SUBMISSION, email_address
 from .evidence_verification import digest
 
 RESPONSE = 'supplier.shortage.claim.response'
@@ -77,10 +77,13 @@ class SupplierResponse(models.Model):
     superseded_by_id = fields.Many2one(RESPONSE, readonly=True, ondelete='restrict')
     current_key = fields.Char(readonly=True, index=True)
     position_kind = fields.Selection([('accepted','Full Acceptance'),('partial','Partial Acceptance'),('rejected','Full Rejection'),('mixed','Pending / Mixed')], compute='_positions', store=True, compute_sudo=False)
-    accepted_amount = fields.Monetary(compute='_positions')
-    rejected_amount = fields.Monetary(compute='_positions')
-    disputed_amount = fields.Monetary(compute='_positions')
-    pending_amount = fields.Monetary(compute='_positions')
+    # These are proportional valuation positions, not payable currency amounts.
+    # Monetary rounds assignments in Odoo 20; preserve source precision here and
+    # use monetary widgets for display, with an explicit minor-unit review flag.
+    accepted_amount = fields.Float(compute='_positions', digits=False, aggregator=False)
+    rejected_amount = fields.Float(compute='_positions', digits=False, aggregator=False)
+    disputed_amount = fields.Float(compute='_positions', digits=False, aggregator=False)
+    pending_amount = fields.Float(compute='_positions', digits=False, aggregator=False)
     financial_review_required = fields.Boolean(compute='_positions', help='Currency presentation rounding cannot reconcile the proportional positions; Accounts review is required, never an invented balancing allocation.')
     _source_unique = models.Constraint('UNIQUE(company_id, source_key)', 'This source message already has a response.')
     _current_unique = models.Constraint('UNIQUE(current_key)', 'Only one current position may cover a submitted revision.')
@@ -88,16 +91,25 @@ class SupplierResponse(models.Model):
     def _access_domain(self, operation):
         return super()._access_domain(operation) & Domain('submission_id','access','read') & ~Domain('evidence_ids','any!',~Domain('id','access','read'))
 
-    @api.depends('line_ids.accepted_amount','line_ids.rejected_amount','line_ids.disputed_amount','submission_id.amount')
+    @api.depends('line_ids.accepted_qty','line_ids.rejected_qty','line_ids.disputed_qty',
+        'line_ids.claim_line_id','submission_id.amount','submission_id.external_snapshot')
     def _positions(self):
         for rec in self:
-            rec.accepted_amount = sum(rec.line_ids.mapped('accepted_amount'))
-            rec.rejected_amount = sum(rec.line_ids.mapped('rejected_amount'))
-            rec.disputed_amount = sum(rec.line_ids.mapped('disputed_amount'))
-            rec.pending_amount = rec.approved_amount - rec.accepted_amount - rec.rejected_amount - rec.disputed_amount
+            rec.accepted_amount = math.fsum(rec.line_ids.mapped('accepted_amount'))
+            rec.rejected_amount = math.fsum(rec.line_ids.mapped('rejected_amount'))
+            rec.disputed_amount = math.fsum(rec.line_ids.mapped('disputed_amount'))
+            snapshots=(rec.submission_id.external_snapshot or {}).get('lines',[])
+            positions={line.claim_line_id.id:line for line in rec.line_ids}
+            # Unanswered lines retain their complete frozen value. Answered
+            # lines derive pending from quantity, never a balancing residual.
+            rec.pending_amount = math.fsum(positions[row['line_id']].pending_amount
+                if row['line_id'] in positions else row['amount'] for row in snapshots)
             displayed=sum(rec.currency_id.round(v) for v in (rec.accepted_amount,rec.rejected_amount,rec.disputed_amount,rec.pending_amount)) if rec.currency_id else 0
             rec.financial_review_required=bool(rec.currency_id and rec.currency_id.compare_amounts(displayed,rec.approved_amount))
-            rec.position_kind = 'accepted' if rec.approved_amount and rec.currency_id.is_zero(rec.approved_amount-rec.accepted_amount) else 'partial' if rec.accepted_amount>0 else 'rejected' if rec.approved_amount and rec.currency_id.is_zero(rec.approved_amount-rec.rejected_amount) else 'mixed'
+            full=bool(snapshots) and len(positions)==len(snapshots)
+            accepted=full and all(positions[row['line_id']].accepted_qty==row['quantity'] for row in snapshots)
+            rejected=full and all(positions[row['line_id']].rejected_qty==row['quantity'] for row in snapshots)
+            rec.position_kind='accepted' if accepted else 'partial' if any(rec.line_ids.mapped('accepted_qty')) else 'rejected' if rejected else 'mixed'
 
     @api.model_create_multi
     def create(self, values):
@@ -294,9 +306,10 @@ class ResponseLine(models.Model):
     rejected_qty = fields.Float(digits='Product Unit')
     disputed_qty = fields.Float(digits='Product Unit')
     pending_qty = fields.Float(compute='_amounts', digits='Product Unit')
-    accepted_amount = fields.Monetary(compute='_amounts')
-    rejected_amount = fields.Monetary(compute='_amounts')
-    disputed_amount = fields.Monetary(compute='_amounts')
+    accepted_amount = fields.Float(compute='_amounts', digits=False, aggregator=False)
+    rejected_amount = fields.Float(compute='_amounts', digits=False, aggregator=False)
+    disputed_amount = fields.Float(compute='_amounts', digits=False, aggregator=False)
+    pending_amount = fields.Float(compute='_amounts', digits=False, aggregator=False)
     decision_reason = fields.Text()
     rejection_reason_id = fields.Many2one('supplier.shortage.response.reason', ondelete='restrict')
     _line_unique = models.Constraint('UNIQUE(response_id, claim_line_id)', 'One position per exact line and response.')
@@ -320,6 +333,7 @@ class ResponseLine(models.Model):
             row.accepted_amount = unit*row.accepted_qty
             row.rejected_amount = unit*row.rejected_qty
             row.disputed_amount = unit*row.disputed_qty
+            row.pending_amount = unit*row.pending_qty
 
     def _validate_position(self):
         for row in self:
