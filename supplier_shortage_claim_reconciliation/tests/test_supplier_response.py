@@ -1,5 +1,6 @@
 ﻿import base64
 from datetime import timedelta
+import ast
 from odoo import Command, fields
 from odoo.exceptions import AccessError, ValidationError
 from odoo.tests import Form
@@ -132,6 +133,8 @@ class TestSupplierResponse(SupplierSubmissionCase):
             self.assertEqual(rec.accepted_amount+rec.rejected_amount,20000)
             self.assertEqual(self.claim.state,'under_review')
             self.assertEqual(self._fresh_claim().verified_recovery_amount,0)
+            action=self.env.ref(M+'action_rejected_supplier_responses')
+            self.assertIn(rec.id,self.Response.search(ast.literal_eval(action.domain)).ids)
 
     def test_rejection_requires_reason_and_explanation(self):
         for changes in ({'rejection_reason_id':False},{'decision_reason':'No'}):
