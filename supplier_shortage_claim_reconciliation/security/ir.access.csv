@@ -113,3 +113,5 @@ dispute_user,dispute visibility,supplier.shortage.claim.dispute,group_claim_user
 dispute_manager,dispute management,supplier.shortage.claim.dispute,group_claim_manager,cru,
 dispute_accounts,dispute accounts visibility,supplier.shortage.claim.dispute,group_accounts_reviewer,r,
 dispute_finance,dispute finance authority,supplier.shortage.claim.dispute,group_finance_manager,cru,
+communication_response_recorder,response communication ledger insertion,supplier.shortage.claim.communication,group_claim_user,c,
+communication_response_finance,response finance ledger insertion,supplier.shortage.claim.communication,group_finance_manager,c,
