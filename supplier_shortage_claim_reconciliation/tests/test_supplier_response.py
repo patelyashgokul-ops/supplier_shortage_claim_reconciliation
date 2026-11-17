@@ -436,3 +436,46 @@ class TestSupplierResponse(SupplierSubmissionCase):
         reviewer.action_invalidate()
         self.assertEqual(rec.verification_state,'invalid'); self.assertFalse(rec.current_key)
         with self.assertRaises(ValidationError),self.cr.savepoint(): reviewer.action_verify()
+
+    def test_manual_response_form_records_explicit_line_positions(self):
+        with Form(self.Response) as form:
+            form.submission_id=self.sub
+            form.supplier_contact_id=self.supplier
+            form.response_type='acceptance'
+            form.response_source='phone'
+            form.response_reference='Direct supplier callback and exact original revision confirmed'
+            form.response_summary='Supplier confirmed acceptance of the explicit selected line quantity during the recorded discussion.'
+            with form.line_ids.new() as line:
+                line.claim_line_id=self.claim.claim_line_ids
+                line.accepted_qty=12
+        rec=form.record
+        self.assertEqual(rec.verification_state,'unverified')
+        self.assertEqual(rec.line_ids.accepted_qty,12)
+        self.assertEqual(rec.reported_by,self.preparer)
+        self.assertEqual(self._fresh_claim().supplier_accepted_amount,0)
+
+    def test_module_administrator_cannot_verify_business_decisions(self):
+        rec=self._response(20)
+        with self.assertRaises(AccessError),self.cr.savepoint(): rec.with_user(self.configurator).action_verify()
+        with self.assertRaises(AccessError),self.cr.savepoint(): rec.with_user(self.preparer).verification_note='Attempted ordinary preparer verification note must be rejected server-side.'
+
+    def test_claim_summary_and_line_financial_outputs_cannot_be_forged(self):
+        for values in ({'supplier_accepted_amount':20000},{'verified_recovery_amount':20000},{'response_ids':[Command.clear()]}):
+            with self.assertRaises(AccessError),self.cr.savepoint(): self.claim.write(values)
+        with self.assertRaises(AccessError),self.cr.savepoint():
+            self._response(line_ids=[Command.create({'claim_line_id':self.claim.claim_line_ids.id,'accepted_qty':12,'accepted_amount':20000})])
+
+    def test_multiple_ambiguous_promises_not_summed(self):
+        rec=self._response(12); self._verify(rec)
+        self._promise(rec,commitment_type='credit')
+        self._promise(rec,commitment_type='replacement')
+        c=self._fresh_claim()
+        self.assertTrue(c.supplier_financial_review)
+        self.assertEqual(c.promised_amount,0)
+        self.assertEqual(c.verified_recovery_amount,0)
+
+    def test_dispute_unchanged_assignment_does_not_duplicate_audit(self):
+        rec=self._dispute()
+        count=len(self.claim.audit_event_ids)
+        rec.write({'assigned_user_id':rec.assigned_user_id.id})
+        self.assertEqual(len(self.claim.audit_event_ids),count)

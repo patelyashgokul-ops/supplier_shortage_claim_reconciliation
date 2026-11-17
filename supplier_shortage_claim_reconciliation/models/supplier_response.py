@@ -1,4 +1,4 @@
-﻿"""Evidence-backed supplier positions; no settlement execution or recovery writes."""
+"""Evidence-backed supplier positions; no settlement execution or recovery writes."""
 import math
 from odoo import api, fields, models
 from odoo.fields import Domain
@@ -140,7 +140,7 @@ class SupplierResponse(models.Model):
                 partner=rec.supplier_contact_id,source_reference=message.message_id if message else False)
             rec._set({'communication_id':event.id})
             version_submission(sub)
-            sub._audit('Supplier response %s recorded, unverified; no recovery.' % rec.id,rec.response_summary)
+            rec._audit_response('Supplier response %s recorded, unverified; no recovery.' % rec.id,rec.response_summary)
             result |= rec
         return result
 
@@ -161,6 +161,21 @@ class SupplierResponse(models.Model):
 
     def _set(self, values):
         return super().write(values)
+
+    def _audit_response(self, description, reason=None):
+        self.ensure_one()
+        self.claim_id._audit('submission_event',description,reason=reason,basis={self.claim_id.id:{
+            'response_id':self.id,'submission_id':self.submission_id.id,'revision':self.revision,
+            'approval_cycle':self.submission_id.approval_id.number,'supplier_id':self.supplier_id.id,
+            'contact_id':self.supplier_contact_id.id,'source':self.response_source,'source_message_id':self.source_message_id.id,
+            'source_key':self.source_key,'reference':self.response_reference,'evidence_ids':self.evidence_ids.ids,
+            'communication_id':self.communication_id.id,'verification_state':self.verification_state,
+            'verified_by':self.verified_by.id,'verified_at':str(self.verified_at),'superseded_by':self.superseded_by_id.id,
+            'positions':[{'claim_line_id':line.claim_line_id.id,'purchase_line_id':line.purchase_line_id.id,
+                'uom_id':line.product_uom_id.id,'submitted_qty':line.submitted_qty,'accepted_qty':line.accepted_qty,
+                'rejected_qty':line.rejected_qty,'disputed_qty':line.disputed_qty,'pending_qty':line.pending_qty,
+                'accepted_amount':line.accepted_amount,'rejected_amount':line.rejected_amount,
+                'rejection_reason_id':line.rejection_reason_id.id,'explanation':line.decision_reason} for line in self.line_ids]}})
 
     def _validate_scope(self):
         self.ensure_one()
@@ -234,7 +249,7 @@ class SupplierResponse(models.Model):
         self._set({'verification_state':'verified','verified_by':self.env.uid,'verified_at':fields.Datetime.now()})
         # Version the parent: stale Repeatable Read transactions must retry.
         version_submission(sub)
-        sub._audit('Response %s verified; prior position %s. Accepted %s, rejected %s, disputed %s, pending %s; recovery unchanged.' %
+        self._audit_response('Response %s verified; prior position %s. Accepted %s, rejected %s, disputed %s, pending %s; recovery unchanged.' %
                    (self.id,old.id or '-',self.accepted_amount,self.rejected_amount,self.disputed_amount,self.pending_amount),self.verification_note)
         return True
 
@@ -244,14 +259,14 @@ class SupplierResponse(models.Model):
             raise ValidationError('Effective decisions require a revised response.')
         if self.verification_state != 'review':
             self._set({'verification_state':'review'})
-            self.submission_id._audit('Response %s requires further source review.' % self.id)
+            self._audit_response('Response %s requires further source review.' % self.id)
 
     def action_invalidate(self):
         self.ensure_one(); authority(self,True); self.submission_id._lock()
         if self.verification_state not in ('unverified','review') or len((self.verification_note or '').strip())<20:
             raise ValidationError('Only unverified responses can be invalidated, with a substantive reason.')
         self._set({'verification_state':'invalid','verified_by':self.env.uid,'verified_at':fields.Datetime.now()})
-        self.submission_id._audit('Response %s rejected as invalid.' % self.id,self.verification_note)
+        self._audit_response('Response %s rejected as invalid.' % self.id,self.verification_note)
 
 
 class ResponseLine(models.Model):
