@@ -22,3 +22,5 @@ from . import claim_approval
 from . import claim_submission
 from . import submission_mail
 from . import submission_wizard
+from . import supplier_response
+from . import supplier_dispute
