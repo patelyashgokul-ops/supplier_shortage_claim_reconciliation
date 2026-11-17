@@ -1091,3 +1091,157 @@ including captured approvals, evidence and source references. Actual four-page P
 visual review passed. SMTP was mocked/prohibited. Machine-readable evidence:
 `.testing/step13-results.json`; prior failed diagnostic runs are excluded from these counts.
 Browser visual/responsive review remains **NOT VERIFIED**. STEP 14 has not been started.
+
+## STEP 14 — Supplier responses and dispute management
+
+Supplier Accepted != Financially Recovered. Supplier Promise != Verified Settlement.
+Supplier Acknowledgment != Claim Acceptance. Negotiation Offer != Binding Internal Acceptance.
+Dispute Closed != Financial Claim Closed.
+
+Supplier responses now reference one exact **sent submission revision**, its immutable approved
+quantity/value snapshot, supplier contact, provenance, recorder and protected communication event.
+The STEP 13 communication ledger remains the only communication ledger. Recording a response does
+not verify it. Acknowledgments confirm receipt only; evidence requests and offers cannot allocate
+accepted quantities. Acceptance, rejection and disputed positions require explicit claim-line rows.
+
+### Recording and independently verifying a decision
+
+Open Supplier Recovery → Supplier Responses → Supplier Decisions, create a response, select the
+sent revision, contact, original source/reference and actual discussion date, and describe its scope.
+For each exact claim line, enter accepted, rejected and disputed quantities in the **submitted UoM**.
+Any omitted line or unallocated quantity remains pending. Rejection requires a configurable reason
+code and meaningful explanation. Module Administrators configure codes under Rejection Reasons;
+configuration authority does not grant business verification authority.
+
+A different Purchase Manager or Finance Manager records a substantive verification note, checks
+supplier identity, original evidence, final/provisional intent, exact revision and line scope, and uses
+Verify Decision. Finance-chain approvals require Finance verification; reductions of any previously
+accepted line require Finance authority. Unverified and requires-review records never affect the
+claim's effective acceptance. Reviewers can reject an unverified source as invalid. Direct ORM/RPC
+writes cannot forge the reviewer, timestamp, effective key, decision quantities or monetary totals.
+
+Phone/meeting records require the actual supplier contact, date, discussion reference and an
+independent reviewer who verifies identity and decision scope. An internal note alone does not
+establish a documentary or email acceptance. Document/portal/other sources require original
+references and current independently verified supplier evidence. A filename alone is insufficient.
+
+### Supplier evidence and inbound email limitations
+
+Supplier Evidence uses the existing STEP 10–11 evidence model, secure private attachments,
+content/size/extension controls, explicit line scope and independent evidence review. Select the
+Supplier Response Submission when uploading a document after claim submission. The document must
+belong to the exact sent revision and supplier evidence category. Source files and associations
+remain immutable; upload another original document for a changed supplier position.
+
+Response evidence is separate from the evidence used to authorize the outgoing package and does
+not rewrite that package or its approval fingerprint. Use **Flag Contradictory Supplier Evidence**
+with a meaningful review note when the supplier's document contradicts the claim. That action
+invalidates readiness/approval for source review; it never changes warehouse, purchase or accounting
+facts. A fresh approval and appropriate supplier confirmation are required for material changes.
+
+Automatic inbound routing is **not configured or enabled by Step 14**. No incoming mail server,
+alias, catchall or transport authentication is provisioned. STEP 13 protects native submission mail
+messages against arbitrary creation. The reliable workflow is manual phone/meeting or verified
+supplier-document recording. Existing trusted native email evidence, where legitimately available,
+must reference the exact original outgoing message, submission, original Message-ID, actual email
+sender matching the supplier contact, and independent verified supplier evidence. Thread correlation
+alone is not authentication. Unexpected senders and forwarded/unrelated threads remain unverified;
+claim-number/PO-number subject matches and keywords never make decisions. Tests simulate trusted
+native message intake using a Python-local capability; this is not a public import bypass or evidence
+that live incoming-mail configuration works. Duplicate Message-IDs within a company return the same
+logical response without appending another communication event.
+
+### Full, partial and rejected positions
+
+Full acceptance requires explicit acceptance covering every submitted line and quantity. Partial
+acceptance preserves the full original claim. For 20 units / 20,000 untaxed, 12 accepted plus 8 disputed
+means accepted 12,000, disputed 8,000 and recovery **zero**. A response accepting 12 units without a
+position on the other 8 leaves 8 pending, not rejected. Different products and repeated products on
+separate PO lines retain exact claim-line and purchase-line identity.
+
+Every effective position uses the frozen submitted **untaxed transaction-currency valuation basis**:
+submitted value = accepted + rejected + disputed + pending. Monetary attribution is derived, never
+manually entered; quantities must be finite, nonnegative and collectively within the submitted bound.
+Alternative accepted prices, consideration, currencies or tax treatment belong to separate negotiation
+events and require financial review. They never silently change the approved claim amount.
+
+A newly verified decision is a **complete replacement position**, not an increment. All lines omitted
+from the replacement return to pending, so explicitly restate unaffected line positions. An earlier
+10,000 acceptance revised to 15,000 total yields 15,000, never 25,000. The earlier response and line
+rows remain immutable, superseded and linked to their successor. Acknowledgments/evidence requests
+and offers do not supersede an existing effective decision. Old revisions are never reactivated, and
+materially changed/superseded submissions cannot be verified as current. Claim summaries explicitly
+flag revalidation when the approved scope is no longer current.
+
+### Negotiations, commitments and disputes
+
+Negotiation History retains supplier offers, company counteroffers, revised offers, company responses
+and final supplier positions as distinct immutable events. Select exact affected lines and the original
+currency and tax basis. The latest supplier offer is displayed as a reference, never added to earlier
+offers or supplier acceptance. Accounts review followed by a different Finance Manager can authorize
+a proposal internally. It remains a proposal: no concession posting, accepted settlement agreement,
+claim reduction, supplier email or recovery is executed. Currency-mismatched and tax-ambiguous offers
+remain financial-review-only; no exchange rate or GST recovery is inferred. Record a properly reviewed
+normalized proposal separately before authorization. Cross-currency conversion automation is deferred.
+
+Supplier Commitments separately record promised credits, replacements, refunds, evidence, delivery
+confirmation, response dates and reconsideration. Quantity promises require the exact submitted line,
+its UoM and bounded quantities. Commitments require a verified supporting response. Dates alone never
+establish fulfillment. Managers can report **Fulfilled - Pending Verification**, cancel a promise, or
+record a new promise explicitly superseding an old one. Revised promises are excluded from the current
+promise summary. Multiple potentially overlapping promises are not added into a fabricated total: the
+claim shows financial review required until an unambiguous position is established. Foreign-currency
+promises retain their currency and are excluded from the claim-currency figure.
+
+The Supplier Dispute Workbench provides Open, Evidence Requested, Under Investigation, Negotiating,
+Awaiting Supplier, Awaiting Internal Decision, Resolved and Closed cases. Managers assign authorized
+internal employees, set priority and next action, request evidence, investigate, negotiate or escalate.
+Duplicate active issues within one submitted revision and exact line are blocked. Independent issues
+on separate lines are supported. Resolution and closure require a substantive business resolution;
+a resolved case can return to investigation. Closed cases are immutable. New source evidence can
+reopen investigation, but no action cancels the original financial claim or writes off supplier liability.
+
+Internal Follow-up Target and Contractual Deadline are separate fields. A contractual date requires
+the actual agreement/reference and calendar basis. Dates are explicitly entered; Step 14 does not
+invent contractual periods or calculate business-day due dates. Use the configured contractual/business
+calendar when determining the date. Overdue indicators do not accept/reject claims or fulfill promises.
+Assigned case actions provide manual escalation; scheduled reminder automation and external negotiation
+mail remain deferred. No notification cron or repeated activity spam is introduced.
+
+### Security, financial accuracy and audit
+
+Company domains and native source access apply to responses, line positions, evidence, negotiations,
+commitments and disputes, including searches and groupings. Shared suppliers follow native Odoo
+company semantics. Review actions enforce real-user roles and activated company membership server-side.
+No business document is read with sudo to compute supplier positions. Summary completeness checks
+refuse to present partial financial totals when underlying supplier case records are inaccessible.
+
+The existing protected claim audit captures recording, verification, supersession, offers, commitment
+changes, dispute assignments/transitions, deadline changes and contradictory evidence. It retains actor,
+time, submission revision, original source and amounts in immutable records. Response and supplier-case
+business transactions do not commit manually. Parent-row locks, parent revision updates, unique current
+position/source keys and retained response history protect concurrent processing and retry behavior.
+
+The claim's Supplier Response tab separates approved submitted value, accepted/rejected/disputed/pending
+positions, latest verified response, current offer, promises, open disputes and next follow-up. All are
+source-derived. The Step 14 verified recovery field is zero because no eligible verified settlement
+allocation source exists yet. Actual credit notes, refunds, replacement goods, recovery allocations,
+write-offs, concession posting and final financial closure will be implemented in later steps.
+
+### Low-token verification commands
+
+Use the existing isolated disposable database and local Odoo 20 virtual environment, never production:
+
+```powershell
+C:/PycharmProjects/odoo20/.venv/Scripts/python.exe .testing/run.py --mode update --level targeted --tags /supplier_shortage_claim_reconciliation:TestSupplierResponse
+C:/PycharmProjects/odoo20/.venv/Scripts/python.exe .testing/run.py --mode update --level regression
+C:/PycharmProjects/odoo20/.venv/Scripts/python.exe .testing/check_step14_concurrency.py
+C:/PycharmProjects/odoo20/.venv/Scripts/python.exe .testing/check_step14_upgrade.py
+```
+
+Run isolated-transaction concurrency checks serially after TransactionCase tests. All supplier SMTP
+transport is mocked/prohibited. Historical upgrade baselines are captured before updating; verification
+compares existing claims, lines, submissions, evidence, approvals, audit and native source records.
+The reusable runner treats zero discovered tests as failure and stores detailed logs locally.
+Framework/prior-step inspection evidence is retained in `.testing/step14-inspection.json`.
+Browser-level visual/responsive review and real inbound mail delivery remain NOT VERIFIED.
