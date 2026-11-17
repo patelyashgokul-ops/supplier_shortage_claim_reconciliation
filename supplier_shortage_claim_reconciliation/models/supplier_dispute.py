@@ -174,7 +174,12 @@ class Commitment(models.Model):
 
     def _search_overdue(self, operator, value):
         domain = Domain('status','=','promised') & Domain('promised_date','<',fields.Date.today())
-        return domain if (operator in ('=','in') and value in (True,[True])) else ~domain
+        if operator not in ('=','!=','in','not in'):
+            raise NotImplementedError('Use boolean equality or membership for overdue promises.')
+        values=value if operator in ('in','not in') else [value]
+        included={bool(item) for item in values}
+        matches={flag for flag in (False,True) if (flag in included)==(operator in ('=','in'))}
+        return Domain.TRUE if len(matches)==2 else Domain.FALSE if not matches else domain if True in matches else ~domain
 
     @api.model_create_multi
     def create(self, values):

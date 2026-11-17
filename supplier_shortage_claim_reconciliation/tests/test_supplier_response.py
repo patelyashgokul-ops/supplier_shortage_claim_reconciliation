@@ -332,6 +332,8 @@ class TestSupplierResponse(SupplierSubmissionCase):
         rec=self._response(12); self._verify(rec)
         promise=self._promise(rec,promised_date=fields.Date.today()-timedelta(days=1))
         self.assertTrue(promise.overdue); self.assertEqual(promise.status,'promised')
+        self.assertIn(promise.id,self.Commitment.search([('id','=',promise.id),('overdue','=',True)]).ids)
+        self.assertIn(promise.id,self.Commitment.search([('id','=',promise.id),('overdue','!=',False)]).ids)
         self.assertEqual(self._fresh_claim().verified_recovery_amount,0)
         promise.with_user(self.sender).status_note='Supplier reports fulfillment; original financial source documents remain unverified.'
         promise.with_user(self.sender).action_pending_verification()
