@@ -250,6 +250,9 @@ class SupplierResponse(models.Model):
                 raise AccessError('Reducing a verified acceptance requires Finance review.')
             if old:
                 old._set({'current_key':False,'verification_state':'superseded','superseded_by_id':self.id})
+                # Deferred ORM writes must release the unique key before a
+                # different row acquires it, including commit-time flushes.
+                old.flush_recordset(['current_key','verification_state','superseded_by_id'])
             self._set({'current_key':str(sub.id)})
         self._set({'verification_state':'verified','verified_by':self.env.uid,'verified_at':fields.Datetime.now()})
         # Version the parent: stale Repeatable Read transactions must retry.
