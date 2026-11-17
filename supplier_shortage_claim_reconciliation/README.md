@@ -1246,12 +1246,16 @@ The reusable runner treats zero discovered tests as failure and stores detailed 
 Framework/prior-step inspection evidence is retained in `.testing/step14-inspection.json`.
 Browser-level visual/responsive review and real inbound mail delivery remain NOT VERIFIED.
 
-Known critical limitation: Odoo rounds Monetary field assignments before the response summary.
-For a 6.66 claim with all 20 units classified, proportional positions can round to 0.33 accepted,
-0.33 rejected and 5.99 disputed. The current implementation leaves 0.01 pending despite zero
-pending quantity, and its financial-review flag does not detect this reliably. This violates the
-required financial attribution safeguard. The failing test is retained as a release blocker;
-no settlement or recovery is created, and Step 14 must not be considered complete.
+Proportional valuation positions use computed Float fields without assignment rounding; native
+monetary widgets format them in the claim currency. This is supported by the installed Odoo 20
+monetary widget. These informational values are not payable settlement allocations. Pending value
+comes from actual pending quantities and omitted submitted lines, never a header balancing residual.
+For a 6.66 claim fully classified by quantity, source positions can be 0.333 accepted, 0.333 rejected
+and 5.994 disputed, with pending value zero. The display rounds them to 0.33, 0.33 and 5.99, so
+Financial Review Required is set rather than assigning an invented cent to pending or another
+category. Source precision and currency are retained; no accounting entry or recovery is inferred.
+Full/partial acceptance and rejection classification uses explicit quantities on exact submitted
+lines, including zero-value positions, rather than a monetary equality shortcut.
 
 For Level 2 without repeating the focused Step 14 class, the equivalent related regression selection is:
 
