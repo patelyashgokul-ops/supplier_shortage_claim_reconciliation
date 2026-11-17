@@ -5,6 +5,11 @@ from odoo.exceptions import AccessError
 from .supplier_response import RESPONSE
 from .claim_submission import SUBMISSION
 
+POSITION_OUTPUTS={'response_ids','dispute_ids','negotiation_ids','commitment_ids','response_submission_id','latest_verified_response_id',
+    'supplier_response_status','supplier_approved_amount','supplier_accepted_amount','supplier_rejected_amount','supplier_disputed_amount',
+    'supplier_pending_amount','current_offer_id','promised_amount','supplier_financial_review','verified_recovery_amount','open_dispute_count',
+    'next_supplier_followup','last_supplier_response'}
+
 
 class ClaimSupplierPosition(models.Model):
     _inherit = 'supplier.shortage.claim'
@@ -22,7 +27,7 @@ class ClaimSupplierPosition(models.Model):
     supplier_disputed_amount = fields.Monetary(compute='_supplier_position')
     supplier_pending_amount = fields.Monetary(compute='_supplier_position')
     current_offer_id = fields.Many2one('supplier.shortage.claim.negotiation',compute='_supplier_position')
-    promised_amount = fields.Monetary(compute='_supplier_position',help='Current promises in the claim currency only, never recovered value.')
+    promised_amount = fields.Monetary(compute='_supplier_position',help='One unambiguous current promise in claim currency. Multiple potentially overlapping promises require review and are not added.')
     supplier_financial_review = fields.Boolean(compute='_supplier_position')
     verified_recovery_amount = fields.Monetary(compute='_supplier_position',help='No verified settlement allocation source exists in Step 14; recovery remains zero.')
     open_dispute_count = fields.Integer(compute='_supplier_position')
@@ -72,8 +77,8 @@ class ClaimSupplierPosition(models.Model):
             supplier_offers=[o for o in rows['offer'] if o.submission_id==sub and o.negotiation_type in ('supplier_offer','revised','final')]
             claim.current_offer_id=supplier_offers[0] if supplier_offers else False
             same_currency=[p for p in rows['promise'] if p.submission_id==sub and p.currency_id==sub.currency_id]
-            claim.promised_amount=sum(p.committed_amount for p in same_currency)
-            claim.supplier_financial_review=any(o.financial_review_required for o in supplier_offers[:1]) or any(p.currency_id!=sub.currency_id for p in rows['promise'] if p.submission_id==sub)
+            claim.promised_amount=same_currency[0].committed_amount if len(same_currency)==1 else 0
+            claim.supplier_financial_review=len(same_currency)>1 or any(o.financial_review_required for o in supplier_offers[:1]) or any(p.currency_id!=sub.currency_id for p in rows['promise'] if p.submission_id==sub)
             claim.open_dispute_count=len(rows['dispute'])
             dates=[d.next_action_date for d in rows['dispute'] if d.next_action_date]
             claim.next_supplier_followup=min(dates) if dates else False
@@ -81,12 +86,12 @@ class ClaimSupplierPosition(models.Model):
 
     @api.model_create_multi
     def create(self, values):
-        protected={'response_ids','dispute_ids','negotiation_ids','commitment_ids'}
+        protected=POSITION_OUTPUTS
         if any(set(v)&protected for v in values) or any('default_'+f in self.env.context for f in protected):
             raise AccessError('Supplier case records require their controlled recording workflows.')
         return super().create(values)
 
     def write(self, values):
-        if {'response_ids','dispute_ids','negotiation_ids','commitment_ids'} & set(values):
+        if POSITION_OUTPUTS & set(values):
             raise AccessError('Supplier case history cannot be reassigned through claims.')
         return super().write(values)

@@ -117,8 +117,17 @@ class SupplierResponse(models.Model):
                     continue
             if any(command[0] != 0 for command in value.get('line_ids', [])):
                 raise AccessError('Use new explicit positions; existing allocations cannot be reassigned.')
+            commands=value.get('line_ids', [])
+            identities=[command[2].get('claim_line_id') for command in commands]
+            if len(set(identities))!=len(identities):
+                raise ValidationError('One explicit position per exact submitted line.')
             clean = dict(value, source_key=key, reported_by=self.env.uid, reported_at=fields.Datetime.now())
+            clean.pop('line_ids',None)
             rec = super(SupplierResponse, self.with_context({})).create(clean)
+            # Explicit creation retains the authenticated actor. Odoo 20's
+            # no-sudo relational command handler otherwise resets to transaction origin.
+            if commands:
+                self.env['supplier.shortage.response.line'].create([dict(command[2],response_id=rec.id) for command in commands])
             rec._validate_scope()
             kind = {'email':'email','document':'letter','phone':'phone'}.get(rec.response_source,'note')
             event = self.env['supplier.shortage.claim.communication']._append(sub,'inbound',kind,rec.response_summary,message)

@@ -14,6 +14,14 @@ D='supplier.shortage.claim.dispute'
 
 class TestSupplierResponse(SupplierSubmissionCase):
     """Real approved/sent revisions; non-superuser business decisions; SMTP mocked."""
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        fixture=cls('test_unverified_does_not_affect_summary')
+        cls.common_claim,cls.common_evidence,cls.common_sub,cls.common_wizard=fixture._queued()
+        fixture.assertEqual(fixture._send_mocked(cls.common_sub),1)
+        cls.common_reason=cls.env['supplier.shortage.response.reason'].with_user(cls.configurator).create({'name':'Supplier disputes delivery quantity'})
+
     def _validate(self, picking, quantity=None):
         return super()._validate(picking,80 if quantity==85 else quantity)
 
@@ -30,9 +38,8 @@ class TestSupplierResponse(SupplierSubmissionCase):
 
     def setUp(self):
         super().setUp()
-        self.claim,self.evidence,self.sub,self.wizard=self._queued()
-        self.assertEqual(self._send_mocked(self.sub),1)
-        self.reason=self.env['supplier.shortage.response.reason'].with_user(self.configurator).create({'name':'Supplier disputes delivery quantity'})
+        self.claim,self.evidence,self.sub,self.wizard=self.common_claim,self.common_evidence,self.common_sub,self.common_wizard
+        self.reason=self.common_reason
         self.Response=self.env[R].with_user(self.user)
         self.Negotiation=self.env[N].with_user(self.user)
         self.Commitment=self.env[C].with_user(self.user)
