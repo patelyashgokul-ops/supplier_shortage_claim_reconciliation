@@ -42,10 +42,17 @@ class ClaimSupplierPosition(models.Model):
         offers=self.env['supplier.shortage.claim.negotiation'].search([('claim_id','in',self.ids)],order='id desc')
         promises=self.env['supplier.shortage.claim.commitment'].search([('claim_id','in',self.ids),('status','in',('promised','pending'))])
         disputes=self.env['supplier.shortage.claim.dispute'].search([('claim_id','in',self.ids),('dispute_state','not in',('resolved','closed'))])
-        hidden=Domain('id','in',self.ids)
-        hidden &= Domain.OR([Domain(f,'any!',~Domain('id','access','read')) for f in ('response_ids','dispute_ids','negotiation_ids','commitment_ids')])
-        if self.search_count(Domain(list(hidden),internal=True)):
-            raise AccessError('Supplier position is unavailable because some underlying decision records are restricted.')
+        self.check_access('read')
+        # Completeness probe only: already-authorized parent IDs and a boolean,
+        # no hidden document identity, count or value leaves this method. A deeply
+        # nested NOT-access domain expands native attachment virtual fields that
+        # Odoo intentionally forbids in ordinary search domains.
+        for table,visible in [('supplier_shortage_claim_response',responses),
+                ('supplier_shortage_claim_negotiation',offers),('supplier_shortage_claim_commitment',self.env['supplier.shortage.claim.commitment'].search([('claim_id','in',self.ids)])),
+                ('supplier_shortage_claim_dispute',self.env['supplier.shortage.claim.dispute'].search([('claim_id','in',self.ids)]))]:
+            self.env.cr.execute('SELECT 1 FROM '+table+' WHERE claim_id=ANY(%s) AND NOT(id=ANY(%s)) LIMIT 1',[self.ids,visible.ids])
+            if self.env.cr.fetchone():
+                raise AccessError('Supplier position is unavailable because underlying decision records are restricted.')
         by_claim={c.id:dict(sub=[],response=[],offer=[],promise=[],dispute=[]) for c in self}
         for kind,records in [('sub',submissions),('response',responses),('offer',offers),('promise',promises),('dispute',disputes)]:
             for rec in records:
