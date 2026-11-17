@@ -170,7 +170,7 @@ class Commitment(models.Model):
     @api.depends('promised_date','status')
     def _overdue(self):
         for rec in self:
-            rec.overdue = rec.status == 'promised' and rec.promised_date < fields.Date.today()
+            rec.overdue = bool(rec.status == 'promised' and rec.promised_date and rec.promised_date < fields.Date.today())
 
     def _search_overdue(self, operator, value):
         domain = Domain('status','=','promised') & Domain('promised_date','<',fields.Date.today())

@@ -207,7 +207,7 @@ class TestSupplierResponse(SupplierSubmissionCase):
     def test_multiline_same_product_po_identity(self):
         claim,_,sub,_=self._queued(products=[self.product,self.product]); self._send_mocked(sub)
         a,b=claim.claim_line_ids
-        rec=self._response(sub=sub,line_ids=[Command.create({'claim_line_id':a.id,'accepted_qty':20}),
+        rec=self._response(sub=sub,response_type='acceptance',line_ids=[Command.create({'claim_line_id':a.id,'accepted_qty':20}),
             Command.create({'claim_line_id':b.id,'accepted_qty':12,'rejected_qty':8,'rejection_reason_id':self.reason.id,
                             'decision_reason':'Supplier disputes this separate purchase line delivery quantity.'})])
         self._verify(rec)
