@@ -1265,3 +1265,33 @@ C:/PycharmProjects/odoo20/.venv/Scripts/python.exe .testing/run.py --mode update
 
 Read-only environment inspection confirmed zero active incoming mail servers and zero aliases for
 claim/submission models in the isolated database. This does not provision or certify production mail.
+
+### STEP 14 verified result
+
+Final gate: **PASS** on Odoo **20.0.14.0.0** in the disposable isolated database.
+There were **349 unique tests** and **435 successful executions** across the final quality runs,
+with **zero failures and zero errors**: 53 focused response tests, 296 STEP 01–13 related regression
+tests, 79 post-change related reruns, 5 final form/filter checks and 2 partial-rejection/action checks.
+Earlier diagnostic failures are retained locally and are excluded from these final passing counts.
+
+Three genuine isolated-transaction races passed: conflicting verifications retained one effective
+position, repeated verification produced one success audit, and duplicate source Message-IDs
+produced one response and one communication event. SMTP was mocked/prohibited. The final upgrade
+comparison preserved **591 original records across 24 models**, including claims, lines, submissions,
+approvals, evidence, audit and native source records, without differences.
+
+Historical response summaries retain the **submitted position currency**, even when the claim is
+returned for correction and its purchase currency changes. This produces a review requirement;
+it does not reinterpret an old amount in the new currency or infer an exchange rate. Rejection
+workbench filters use line-level rejected quantities, including mixed partial-acceptance responses.
+
+Evidence: `.testing/step14-results.json`, `.testing/step14-test-coverage.json`,
+`.testing/concurrency-step14-result.json`, `.testing/upgrade-step14-result.json` and
+`.testing/step14-inspection.json`. The rounding and deferred-flush defects found during development
+were repaired and retested; their diagnostic evidence remains available.
+
+Known limitations: live inbound email is not configured or verified; use the secure manual response
+workflow. Browser visual/responsive review remains NOT VERIFIED (native views and forms were tested).
+Business-day deadline calculation, automatic reminders, FX offer normalization, settlement execution
+and the executive recovery dashboard remain outside this step. No credit note, refund, replacement
+shipment, payment, accounting entry or recovery allocation is generated. STEP 15 has not been started.
