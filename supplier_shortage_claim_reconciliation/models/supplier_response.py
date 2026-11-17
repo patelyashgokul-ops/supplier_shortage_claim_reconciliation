@@ -56,6 +56,7 @@ class SupplierResponse(models.Model):
     verified_at = fields.Datetime(readonly=True)
     superseded_by_id = fields.Many2one(RESPONSE, readonly=True, ondelete='restrict')
     current_key = fields.Char(readonly=True, index=True)
+    position_kind = fields.Selection([('accepted','Full Acceptance'),('partial','Partial Acceptance'),('rejected','Full Rejection'),('mixed','Pending / Mixed')], compute='_positions', store=True, compute_sudo=False)
     accepted_amount = fields.Monetary(compute='_positions')
     rejected_amount = fields.Monetary(compute='_positions')
     disputed_amount = fields.Monetary(compute='_positions')
@@ -73,6 +74,7 @@ class SupplierResponse(models.Model):
             rec.rejected_amount = sum(rec.line_ids.mapped('rejected_amount'))
             rec.disputed_amount = sum(rec.line_ids.mapped('disputed_amount'))
             rec.pending_amount = rec.approved_amount - rec.accepted_amount - rec.rejected_amount - rec.disputed_amount
+            rec.position_kind = 'accepted' if rec.approved_amount and rec.currency_id.is_zero(rec.approved_amount-rec.accepted_amount) else 'partial' if rec.accepted_amount>0 else 'rejected' if rec.approved_amount and rec.currency_id.is_zero(rec.approved_amount-rec.rejected_amount) else 'mixed'
 
     @api.model_create_multi
     def create(self, values):
