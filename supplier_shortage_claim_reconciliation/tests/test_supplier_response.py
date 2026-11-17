@@ -419,7 +419,13 @@ class TestSupplierResponse(SupplierSubmissionCase):
 
     def test_superseded_submission_response_not_effective(self):
         rec=self._response(12)
-        self.sub.with_user(self.sender).action_prepare_revision('Corrected claim statement requires renewed explicit supplier confirmation')
+        action=self.sub.with_user(self.sender).action_prepare_revision('Corrected claim statement requires renewed explicit supplier confirmation')
+        revision=self.env[SUB].with_user(self.sender).browse(action['res_id'])
+        composer=revision.action_open_composer()
+        wizard=self.env['supplier.shortage.claim.send.wizard'].with_user(self.sender).browse(composer['res_id'])
+        wizard.evidence_ids=[Command.set(self.evidence.ids)]
+        wizard.action_preview(); wizard.confirmed=True; wizard.action_submit_to_supplier()
+        self._send_mocked(revision)
         with self.assertRaises(ValidationError),self.cr.savepoint(): self._verify(rec)
 
     def test_invalid_response_review_and_audit(self):

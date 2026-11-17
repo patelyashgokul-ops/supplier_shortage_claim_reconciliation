@@ -544,7 +544,9 @@ class ClaimSubmission(models.Model):
         key='F:%s:%s'%(self.claim_id.id,self.id) if followup else '%s:%s'%(self.claim_id.id,self.approval_id.id)
         existing=self.search([('claim_id','=',self.claim_id.id),('active_cycle_key','=',key),('id','!=',self.id)])
         if existing: return existing._form_action()
-        if not followup: self._set({'active_cycle_key':False})
+        if not followup:
+            self._set({'active_cycle_key':False})
+            self.flush_recordset(['active_cycle_key'])
         new=self._prepare(self.claim_id,self.approval_id,policy,self,'followup' if followup else 'claim',reason)
         return new._form_action()
 
