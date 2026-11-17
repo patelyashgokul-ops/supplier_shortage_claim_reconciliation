@@ -1245,3 +1245,17 @@ compares existing claims, lines, submissions, evidence, approvals, audit and nat
 The reusable runner treats zero discovered tests as failure and stores detailed logs locally.
 Framework/prior-step inspection evidence is retained in `.testing/step14-inspection.json`.
 Browser-level visual/responsive review and real inbound mail delivery remain NOT VERIFIED.
+
+Currency presentation can itself require review: proportional source values are retained at full
+precision, while the currency widget rounds for display. If the displayed accepted/rejected/disputed/
+pending components do not reconcile at the currency's minor unit, **Financial Review Required** is
+shown. No rounding remainder is silently assigned to another business category.
+
+For Level 2 without repeating the focused Step 14 class, the equivalent related regression selection is:
+
+```powershell
+C:/PycharmProjects/odoo20/.venv/Scripts/python.exe .testing/run.py --mode update --level regression --tags /supplier_shortage_claim_reconciliation,-/supplier_shortage_claim_reconciliation:TestSupplierResponse
+```
+
+Read-only environment inspection confirmed zero active incoming mail servers and zero aliases for
+claim/submission models in the isolated database. This does not provision or certify production mail.

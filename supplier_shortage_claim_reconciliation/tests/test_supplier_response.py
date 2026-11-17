@@ -536,7 +536,7 @@ class TestSupplierResponse(SupplierSubmissionCase):
         self.assertEqual(self._fresh_claim().verified_recovery_amount,0)
 
     def test_minor_currency_rounding_requires_review_without_balancing(self):
-        self.test_unit_value=.33333
+        self.test_unit_value=.37
         self.test_discount=10
         claim,_,sub,_=self._queued(); self._send_mocked(sub)
         rec=self._response(1,rejected=1,disputed=18,sub=sub); self._verify(rec)
