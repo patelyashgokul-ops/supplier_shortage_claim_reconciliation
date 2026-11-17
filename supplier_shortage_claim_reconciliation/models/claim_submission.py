@@ -597,7 +597,7 @@ class ClaimCommunication(models.Model):
     @api.model
     def _append(self, submission, direction, kind, note, message=None, partner=None, source_reference=None):
         submission.check_access('read')
-        return super(ClaimCommunication,self.with_context({})).create({'submission_id':submission.id,'partner_id':(partner or submission.recipient_partner_id).id,'direction':direction,'kind':kind,
+        return super(ClaimCommunication,self.with_context({},allowed_company_ids=submission.env.companies.ids)).create({'submission_id':submission.id,'partner_id':(partner or submission.recipient_partner_id).id,'direction':direction,'kind':kind,
             'subject':submission.subject or submission.name,'mail_message_id':message.id if message else False,
             'message_reference':source_reference if source_reference is not None else submission.message_reference,'recorded_by':self.env.uid,'communication_date':fields.Datetime.now(),'note':note})
 

@@ -33,7 +33,7 @@ class SupplierResponseEvidence(models.Model):
                 raise ValidationError('Supplier documents require explicit claim line scope.')
         token=SUPPLIER_DOCUMENT.set(True)
         try:
-            records=super(SupplierResponseEvidence,self.with_context({})).create(values)
+            records=super(SupplierResponseEvidence,self.with_context({},allowed_company_ids=self.env.companies.ids)).create(values)
             for rec in records:
                 valid={r['line_id'] for r in rec.supplier_response_submission_id.external_snapshot['lines']}
                 if set(rec.scope_line_ids.ids)-valid:

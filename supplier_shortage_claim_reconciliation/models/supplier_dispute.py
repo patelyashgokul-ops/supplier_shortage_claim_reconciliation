@@ -1,4 +1,4 @@
-﻿"""Immutable negotiation/commitment events and controlled dispute cases."""
+"""Immutable negotiation/commitment events and controlled dispute cases."""
 import math
 from odoo import api, fields, models
 from odoo.exceptions import AccessError, ValidationError
@@ -80,7 +80,7 @@ class Negotiation(models.Model):
         allowed = {'submission_id','response_id','evidence_ids','description','negotiation_type','proposed_amount','currency_id','tax_basis','claim_line_ids','supersedes_event_id'}
         if any(set(v)-allowed for v in values):
             raise AccessError('Negotiation decisions and actor fields are server controlled.')
-        records = super(Negotiation,self.with_context({})).create([dict(v,recorded_by=self.env.uid,event_date=fields.Datetime.now()) for v in values])
+        records = super(Negotiation,self.with_context({},allowed_company_ids=self.env.companies.ids)).create([dict(v,recorded_by=self.env.uid,event_date=fields.Datetime.now()) for v in values])
         for rec in records:
             rec._validate_scope(); rec.submission_id._lock()
             if not math.isfinite(rec.proposed_amount) or rec.proposed_amount<0:
@@ -182,7 +182,7 @@ class Commitment(models.Model):
                    'claim_line_id','product_uom_id','promised_date','responsible_id','supersedes_id'}
         if any(set(v)-allowed for v in values):
             raise AccessError('Commitment status and provenance are server controlled.')
-        records = super(Commitment,self.with_context({})).create([dict(v,recorded_by=self.env.uid,event_date=fields.Datetime.now()) for v in values])
+        records = super(Commitment,self.with_context({},allowed_company_ids=self.env.companies.ids)).create([dict(v,recorded_by=self.env.uid,event_date=fields.Datetime.now()) for v in values])
         for rec in records:
             rec._validate_scope(); rec.submission_id._lock()
             if not all(math.isfinite(v) and v>=0 for v in (rec.committed_amount,rec.committed_qty)):
@@ -274,7 +274,7 @@ class Dispute(models.Model):
             if self.search_count([('active_issue_key','=',key)]):
                 raise ValidationError('An active dispute already covers this issue and line.')
             clean.append(dict(v,active_issue_key=key,recorded_by=self.env.uid,event_date=fields.Datetime.now()))
-        records=super(Dispute,self.with_context({})).create(clean)
+        records=super(Dispute,self.with_context({},allowed_company_ids=self.env.companies.ids)).create(clean)
         for rec in records:
             rec._validate_scope(); rec._validate_case()
             rec.submission_id._audit('Dispute %s opened for line %s, assigned to user %s.' % (rec.id,rec.claim_line_id.id or '-',rec.assigned_user_id.id),rec.description)

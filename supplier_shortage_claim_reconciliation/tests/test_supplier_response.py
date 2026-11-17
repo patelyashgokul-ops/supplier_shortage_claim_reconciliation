@@ -479,3 +479,19 @@ class TestSupplierResponse(SupplierSubmissionCase):
         count=len(self.claim.audit_event_ids)
         rec.write({'assigned_user_id':rec.assigned_user_id.id})
         self.assertEqual(len(self.claim.audit_event_ids),count)
+
+    def test_authorized_secondary_company_survives_context_cleanup(self):
+        self.preparer.write({'company_ids':[Command.set((self.company|self.other).ids)],'company_id':self.other.id})
+        self.Response=self.Response.with_context(allowed_company_ids=self.company.ids)
+        rec=self._response(12)
+        self.assertEqual(rec.company_id,self.company)
+        self.assertEqual(rec.communication_id.company_id,self.company)
+        self._verify(rec)
+        self.assertEqual(rec.accepted_amount,12000)
+
+    def test_finance_chain_cannot_be_bypassed_by_purchase_verification(self):
+        claim,_,sub,_=self._queued(chain='finance'); self._send_mocked(sub)
+        rec=self._response(20,sub=sub)
+        with self.assertRaises(AccessError),self.cr.savepoint(): self._verify(rec)
+        self._verify(rec,self.finance)
+        self.assertEqual(rec.accepted_amount,20000)

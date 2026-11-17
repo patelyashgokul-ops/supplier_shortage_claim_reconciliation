@@ -54,6 +54,7 @@ class ClaimSupplierPosition(models.Model):
         disputes=self.env['supplier.shortage.claim.dispute'].search([('claim_id','in',self.ids),('dispute_state','not in',('resolved','closed'))])
         communications=dict(self.env['supplier.shortage.claim.communication']._read_group([('claim_id','in',self.ids)],['claim_id'],['communication_date:max']))
         self.check_access('read')
+        persisted_ids=[record_id for record_id in self.ids if isinstance(record_id,int)]
         # Completeness probe only: already-authorized parent IDs and a boolean,
         # no hidden document identity, count or value leaves this method. A deeply
         # nested NOT-access domain expands native attachment virtual fields that
@@ -61,7 +62,7 @@ class ClaimSupplierPosition(models.Model):
         for table,visible in [('supplier_shortage_claim_response',responses),
                 ('supplier_shortage_claim_negotiation',offers),('supplier_shortage_claim_commitment',self.env['supplier.shortage.claim.commitment'].search([('claim_id','in',self.ids)])),
                 ('supplier_shortage_claim_dispute',self.env['supplier.shortage.claim.dispute'].search([('claim_id','in',self.ids)]))]:
-            self.env.cr.execute('SELECT 1 FROM '+table+' WHERE claim_id=ANY(%s) AND NOT(id=ANY(%s)) LIMIT 1',[self.ids,visible.ids])
+            self.env.cr.execute('SELECT 1 FROM '+table+' WHERE claim_id=ANY(%s) AND NOT(id=ANY(%s)) LIMIT 1',[persisted_ids,visible.ids])
             if self.env.cr.fetchone():
                 raise AccessError('Supplier position is unavailable because underlying decision records are restricted.')
         by_claim={c.id:dict(sub=[],response=[],offer=[],promise=[],dispute=[]) for c in self}

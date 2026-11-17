@@ -129,7 +129,7 @@ class SupplierResponse(models.Model):
                 raise ValidationError('One explicit position per exact submitted line.')
             clean = dict(value, source_key=key, reported_by=self.env.uid, reported_at=fields.Datetime.now())
             clean.pop('line_ids',None)
-            rec = super(SupplierResponse, self.with_context({})).create(clean)
+            rec = super(SupplierResponse, self.with_context({},allowed_company_ids=self.env.companies.ids)).create(clean)
             # Explicit creation retains the authenticated actor. Odoo 20's
             # no-sudo relational command handler otherwise resets to transaction origin.
             if commands:
@@ -341,7 +341,7 @@ class ResponseLine(models.Model):
             authority(parent); parent.submission_id._lock()
             if parent.verification_state != 'unverified' or parent.communication_id:
                 raise AccessError('Positions are frozen on recording. Create a revised response.')
-        records = super(ResponseLine,self.with_context({})).create(values)
+        records = super(ResponseLine,self.with_context({},allowed_company_ids=self.env.companies.ids)).create(values)
         records._validate_position()
         return records
 
