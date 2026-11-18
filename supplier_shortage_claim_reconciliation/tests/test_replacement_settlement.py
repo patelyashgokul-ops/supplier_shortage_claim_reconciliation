@@ -81,6 +81,7 @@ class TestReplacementSettlement(SupplierSubmissionCase):
         second = self._draft(claim, promise, move_b, 1)
         before_moves = (move_a.quantity, move_b.quantity)
         documents = self.env['account.move'].search_count([])
+        self.assertEqual(second.remaining_promise_qty, 12)
         for row in first | second:
             self._review(row)
             self.assertEqual(row.effective_qty, 0)
