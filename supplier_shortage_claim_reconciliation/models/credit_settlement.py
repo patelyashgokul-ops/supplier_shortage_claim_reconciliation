@@ -33,10 +33,20 @@ def version_credit(env, ids):
         """, [sorted(set(ids))])
 
 
+def correction_origins(moves):
+    parents=moves.reversed_entry_id
+    return parents | moves.debit_origin_id if 'debit_origin_id' in moves._fields else parents
+
+
+def accounting_corrections(moves):
+    children=moves.reversal_move_ids
+    return children | moves.debit_note_ids if 'debit_note_ids' in moves._fields else children
+
+
 def notify_credit_source(env, moves):
     if not env.registry.ready or not moves:
         return
-    roots = (moves | moves.reversed_entry_id).filtered(lambda m:m.move_type=='in_refund')
+    roots = (moves | correction_origins(moves)).filtered(lambda m:m.move_type=='in_refund')
     _mark_credit_roots(env,roots.ids)
 
 
@@ -199,7 +209,7 @@ class CreditAllocation(models.Model):
             return move.state,0,self.env['account.move'],False
         currency=line.currency_id
         amount=line.price_subtotal
-        reversals=move.reversal_move_ids
+        reversals=accounting_corrections(move)
         reversals.check_access('read')
         reversals=reversals.filtered(lambda record:record.state=='posted')
         offset=0
@@ -207,10 +217,11 @@ class CreditAllocation(models.Model):
         for reversal in reversals.sorted('id'):
             products=reversal.invoice_line_ids.filtered(lambda item:item.display_type=='product')
             products.check_access('read')
-            reversal.reversal_move_ids.check_access('read')
+            subsequent=accounting_corrections(reversal)
+            subsequent.check_access('read')
             if (reversal.move_type!='in_invoice' or reversal.currency_id!=currency
                     or reversal.company_id!=move.company_id or reversal.commercial_partner_id!=move.commercial_partner_id
-                    or reversal.reversal_move_ids.filtered(lambda item:item.state=='posted')):
+                    or subsequent.filtered(lambda item:item.state=='posted')):
                 return 'review',0,reversals,False
             def matches(item):
                 return item.product_id==line.product_id and item.purchase_line_id==line.purchase_line_id
@@ -468,6 +479,8 @@ class CreditAllocation(models.Model):
         if not payable:
             return 'unknown'
         applied=bank=False
+        corrections=accounting_corrections(move)
+        corrections.check_access('read')
         for line in payable:
             matches=line.matched_debit_ids | line.matched_credit_ids
             matches.check_access('read')
@@ -477,7 +490,7 @@ class CreditAllocation(models.Model):
                 doc=other.move_id
                 doc.check_access('read')
                 if (doc.state!='posted' or doc.company_id!=move.company_id or other.account_id!=line.account_id
-                        or other.partner_id.commercial_partner_id!=move.commercial_partner_id or doc.reversed_entry_id==move):
+                        or other.partner_id.commercial_partner_id!=move.commercial_partner_id or doc in corrections):
                     return 'unknown'
                 if doc.move_type=='in_invoice':
                     applied=True

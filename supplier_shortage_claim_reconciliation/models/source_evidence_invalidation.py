@@ -235,12 +235,13 @@ class SourcePicking(models.Model):
 
 
 def classify_accounting_sources(env, records, moves):
-    credit_docs = moves.filtered(lambda move: move.move_type == 'in_refund'
-                                 or move.reversed_entry_id.move_type == 'in_refund')
+    from .credit_settlement import correction_origins
+    credit_docs = moves.filtered(lambda move: move.move_type=='in_refund'
+                                 or 'in_refund' in correction_origins(move).mapped('move_type'))
     regular_docs = moves-credit_docs
     invalidate_po_lines(env, records.filtered(lambda row: row.move_id in regular_docs).purchase_line_id.ids,'billing')
     invalidate_po_lines(env, records.filtered(lambda row: row.move_id in credit_docs).purchase_line_id.ids
-                        + credit_docs.reversed_entry_id.invoice_line_ids.purchase_line_id.ids,'credit')
+                        + correction_origins(credit_docs).invoice_line_ids.purchase_line_id.ids,'credit')
 
 
 class SourceAccountLine(models.Model):
@@ -256,7 +257,7 @@ class SourceAccountLine(models.Model):
         return rows
 
     def write(self, vals):
-        from .credit_settlement import notify_credit_source
+        from .credit_settlement import correction_origins, notify_credit_source
         material=vals.keys() & {'purchase_line_id','quantity','product_uom_id','product_id','price_unit',
                                 'discount','tax_ids','move_id','price_subtotal','price_total','balance','amount_currency'}
         old=self.purchase_line_id.ids if material else []
@@ -268,14 +269,14 @@ class SourceAccountLine(models.Model):
             notify_credit_source(self.env,(products | self.filtered(lambda row:row.display_type=='product')).move_id.filtered(
                 lambda m:m.move_type=='in_refund' or m.state=='posted'))
             classify_accounting_sources(self.env,self,moves)
-            old_kind='credit' if moves and all(m.move_type=='in_refund' or m.reversed_entry_id.move_type=='in_refund' for m in moves) else 'billing'
+            old_kind='credit' if moves and all(m.move_type=='in_refund' or 'in_refund' in correction_origins(m).mapped('move_type') for m in moves) else 'billing'
             invalidate_po_lines(self.env,list(set(old)-set(self.purchase_line_id.ids)),old_kind)
         return result
 
     def unlink(self):
-        from .credit_settlement import notify_credit_source
-        moves=self.move_id
-        credit_rows=self.filtered(lambda r:r.move_id.move_type=='in_refund' or r.move_id.reversed_entry_id.move_type=='in_refund')
+        from .credit_settlement import correction_origins, notify_credit_source
+        credit_rows=self.filtered(lambda r:r.move_id.move_type=='in_refund'
+                                  or 'in_refund' in correction_origins(r.move_id).mapped('move_type'))
         regular_ids=(self-credit_rows).purchase_line_id.ids
         credit_ids=credit_rows.purchase_line_id.ids
         notify_credit_source(self.env,self.filtered(lambda row:row.display_type=='product').move_id.filtered(
@@ -293,16 +294,17 @@ class SourceBill(models.Model):
     _inherit='account.move'
 
     def write(self, vals):
-        from .credit_settlement import notify_credit_source
-        material=vals.keys() & {'state','partner_id','currency_id','move_type','ref','invoice_date','date','reversed_entry_id'}
-        old=self.reversed_entry_id if material else self.browse()
+        from .credit_settlement import correction_origins, notify_credit_source
+        link_fields={'reversed_entry_id','debit_origin_id','move_type'}
+        material=vals.keys() & ({'state','partner_id','currency_id','ref','invoice_date','date'} | link_fields)
+        old=correction_origins(self) if material else self.browse()
         old_posted=self.filtered(lambda m:m.state=='posted') if material else self.browse()
         prior_credit=self.filtered(lambda m:m.move_type=='in_refund') if material else self.browse()
         result=super().write(vals)
         if material:
             current=self.filtered(lambda m:m.move_type=='in_refund' or m.state=='posted')
             notify_credit_source(self.env,current | old_posted)
-            if 'reversed_entry_id' in vals or 'move_type' in vals:
+            if vals.keys() & link_fields:
                 from .credit_settlement import version_credit
                 version_credit(self.env,prior_credit.ids)
                 notify_credit_source(self.env,old.filtered(lambda m:m.move_type=='in_refund'))
