@@ -62,9 +62,13 @@ class TestReplacementSettlement(SupplierSubmissionCase):
         approved = claim.verified_amount
         stock = claim.purchase_id
         move_a = additional_receipt(stock, 4).move_ids
-        move_b = additional_receipt(stock, 5).move_ids
+        pack = self.env['uom.uom'].create({
+            'name': 'SSC replacement pack of three',
+            'relative_uom_id': stock.order_line.uom_id.id, 'relative_factor': 3,
+        })
+        move_b = additional_receipt(stock, 2, source_uom=pack).move_ids
         first = self._draft(claim, promise, move_a, 4)
-        second = self._draft(claim, promise, move_b, 3)
+        second = self._draft(claim, promise, move_b, 1)
         before_moves = (move_a.quantity, move_b.quantity)
         documents = self.env['account.move'].search_count([])
         for row in first | second:
@@ -73,6 +77,9 @@ class TestReplacementSettlement(SupplierSubmissionCase):
             authorized = row.with_user(self.finance)
             authorized.action_verify()
             authorized.action_verify()
+        self.assertEqual(second.source_received_qty, 2)
+        self.assertEqual(second.source_uom_id, pack)
+        self.assertEqual(second.allocated_qty, 3)
         self.assertEqual(second.promised_qty, 12)
         self.assertEqual(second.remaining_promise_qty, 5)
         self.assertEqual(claim.claim_line_ids.replacement_qty, 7)

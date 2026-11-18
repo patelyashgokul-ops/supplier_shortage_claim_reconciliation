@@ -193,7 +193,7 @@
                 <page name="replacement_settlement" string="Replacement Goods"
                       groups="supplier_shortage_claim_reconciliation.group_claim_user,supplier_shortage_claim_reconciliation.group_warehouse_reviewer,supplier_shortage_claim_reconciliation.group_accounts_reviewer">
                     <button name="action_open_replacements" type="object" string="Open Replacement Workbench" class="btn-secondary"/>
-                    <field name="claim_line_ids" readonly="True"
+                    <field name="replacement_summary_line_ids" readonly="True"
                            groups="supplier_shortage_claim_reconciliation.group_claim_user,supplier_shortage_claim_reconciliation.group_accounts_reviewer">
                         <list create="false" delete="false">
                             <field name="product_id"/>

@@ -85,7 +85,7 @@ def submit_prepared(claim):
     return claim.action_submit_for_review()
 
 
-def additional_receipt(order, quantity=None):
+def additional_receipt(order, quantity=None, source_uom=None):
     """New native receipt after a closed delivery, for source-change regressions."""
     env=order.env(user=1)
     warehouse=order.picking_type_id.warehouse_id
@@ -93,7 +93,7 @@ def additional_receipt(order, quantity=None):
         'picking_type_id':warehouse.in_type_id.id,'location_id':env.ref('stock.stock_location_suppliers').id,
         'location_dest_id':warehouse.lot_stock_id.id,'move_ids':[Command.create({'product_id':line.product_id.id,
             'product_uom_qty':quantity if quantity is not None else line.product_qty-line.qty_received,
-            'uom_id':line.uom_id.id,'purchase_line_id':line.id,
+            'uom_id':(source_uom or line.uom_id).id,'purchase_line_id':line.id,
             'location_id':env.ref('stock.stock_location_suppliers').id,'location_dest_id':warehouse.lot_stock_id.id}) for line in order.order_line if not line.display_type]})
     picking.action_confirm()
     picking.action_assign()
