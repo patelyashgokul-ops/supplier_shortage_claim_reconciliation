@@ -203,7 +203,7 @@
                             <field name="replacement_reversed_qty" string="Reversed"/>
                             <field name="replacement_remaining_qty" string="Remaining"/>
                             <field name="replacement_value" string="Goods Recovery"/>
-                            <field name="replacement_unresolved_value" string="Unresolved Value"/>
+                            <field name="replacement_unresolved_value" string="Remaining After Goods"/>
                             <field name="currency_id" column_invisible="True"/>
                         </list>
                     </field>

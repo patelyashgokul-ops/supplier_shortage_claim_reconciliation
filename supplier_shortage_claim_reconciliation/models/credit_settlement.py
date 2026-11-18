@@ -56,7 +56,7 @@ def _mark_credit_roots(env, ids):
         SELECT claim_id,company_id,id,'credit_event',%s,statement_timestamp() AT TIME ZONE 'UTC',
                'Credit source requires revalidation',json_build_object('fingerprint',source_fingerprint)
         FROM updated
-    """, [tuple(roots.ids),env.uid])
+    """, [tuple(ids),env.uid])
     env[MODEL].invalidate_model(['source_dirty','effective_value','source_status','available_source','realization'],flush=False)
     env['supplier.shortage.claim.line'].invalidate_model(
         ['credit_value','settlement_unresolved_value','settlement_review'],flush=False)
@@ -607,6 +607,11 @@ class CreditClaimLine(models.Model):
         coverage=dict(self.env.cr.fetchall())
         visible_goods=goods.search([('claim_line_id','in',self.ids),('state','=','verified')]).grouped(
             'claim_line_id') if goods.has_access('read') else {}
+        approvals=self.env['supplier.shortage.approval.cycle']
+        cycles=approvals.search([('claim_id','in',self.claim_id.ids),('state','=','approved')]) if approvals.has_access('read') else approvals
+        current={cycle.claim_id.id:cycle for cycle in cycles if cycle.number==cycle.claim_id.approval_cycle}
+        frozen={item['line_id']:item for cycle in current.values()
+                for item in cycle.snapshot.get('basis',{}).get('financial_lines',[])}
         for line in self:
             allocations=rows.get(line,model.browse())
             active=allocations.filtered(lambda row:row.state=='verified')
@@ -614,13 +619,14 @@ class CreditClaimLine(models.Model):
             line.credit_value=sum(active.filtered(lambda row:row.currency_id==line.currency_id).mapped('effective_value'))
             line.reversed_credit_value=sum(allocations.filtered(
                 lambda row:row.state=='reversed' and row.currency_id==line.currency_id).mapped('claim_value'))
-            line.settlement_approved_value=line.replacement_unresolved_value+line.replacement_value
+            basis=frozen.get(line.id,{})
+            line.settlement_approved_value=basis.get('amount',0)
             incomplete=coverage.get(line.id,0)!=len(active)+len(goods_rows)
-            unsettled=line.replacement_unresolved_value-line.credit_value
+            unsettled=line.settlement_approved_value-line.replacement_value-line.credit_value
             currency=line.currency_id
             line.settlement_review=(incomplete or (currency and currency.compare_amounts(unsettled,0)<0)
                                     or any(not row.effective_value for row in active)
-                                    or any(row.source_dirty for row in goods_rows))
+                                    or any(not row.effective_qty for row in goods_rows))
             line.settlement_unresolved_value=currency.round(unsettled) if currency and not incomplete else 0
 
 
