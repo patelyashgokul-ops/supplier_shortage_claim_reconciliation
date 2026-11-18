@@ -228,6 +228,8 @@ class CreditAllocation(models.Model):
             signatures.append((reversal.id,exact.id,exact.price_subtotal or 0,exact.price_total or 0))
         if not math.isfinite(amount) or currency.compare_amounts(amount,0)<=0:
             return 'review',0,reversals,False
+        if currency.compare_amounts(offset,amount)>0:
+            return 'review',0,reversals,False
         net=currency.round(max(amount-offset,0))
         status='reversed' if currency.is_zero(net) else 'partial' if offset else 'posted'
         fp=hashlib.sha256(json.dumps([
@@ -532,7 +534,8 @@ class CreditAllocation(models.Model):
                 status,net,_,fp=row._source()
                 row.source_status=status
                 known=visible.get(row.credit_line_id,self.browse())
-                if coverage.get(row.credit_line_id.id,0)==len(known):
+                if (coverage.get(row.credit_line_id.id,0)==len(known)
+                        and all(item.source_snapshot_currency_id==row.source_currency_id for item in known)):
                     row.available_source=max(0,net-sum(known.mapped('source_amount')))
                 effective=(row.state=='verified' and not row.source_dirty and fp and fp==row.source_fingerprint
                            and status in ('posted','partial') and row.approval_id.number==row.claim_id.approval_cycle
@@ -614,10 +617,11 @@ class CreditClaimLine(models.Model):
             line.settlement_approved_value=line.replacement_unresolved_value+line.replacement_value
             incomplete=coverage.get(line.id,0)!=len(active)+len(goods_rows)
             unsettled=line.replacement_unresolved_value-line.credit_value
-            line.settlement_review=(incomplete or unsettled < -line.currency_id.rounding/2
+            currency=line.currency_id
+            line.settlement_review=(incomplete or (currency and currency.compare_amounts(unsettled,0)<0)
                                     or any(not row.effective_value for row in active)
                                     or any(row.source_dirty for row in goods_rows))
-            line.settlement_unresolved_value=0 if incomplete else line.currency_id.round(unsettled)
+            line.settlement_unresolved_value=currency.round(unsettled) if currency and not incomplete else 0
 
 
 class CreditClaim(models.Model):

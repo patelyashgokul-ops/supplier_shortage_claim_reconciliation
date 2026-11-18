@@ -1,3 +1,5 @@
+import base64
+
 from odoo import Command, fields
 from odoo.exceptions import AccessError, ValidationError
 from odoo.tests.common import new_test_user
@@ -166,7 +168,7 @@ class TestCreditSettlement(SupplierSubmissionCase):
         row.action_submit()
         with self.assertRaisesRegex(ValidationError,'historical FX'),self.env.cr.savepoint():
             row.with_user(self.reviewer).action_accounts()
-        self.env['res.currency.rate'].create({'currency_id':other.id,'company_id':self.company.root_id.id,
+        rate=self.env['res.currency.rate'].create({'currency_id':other.id,'company_id':self.company.root_id.id,
                                              'name':credit.date,'rate':2})
         row.with_user(self.reviewer).action_accounts()
         row.with_user(self.finance).action_verify()
@@ -175,3 +177,64 @@ class TestCreditSettlement(SupplierSubmissionCase):
         self.assertEqual(row.effective_value,other._convert(20,claim.currency_id,self.company,credit.date))
         self.assertEqual(row.company_value,self.company.currency_id.round(abs(credit.invoice_line_ids.balance)/4))
         self.assertEqual(row.fx_basis['rates'][0]['date'],str(credit.date))
+        historical=row.claim_value
+        rate.rate=3
+        self.assertTrue(row.source_dirty)
+        self.assertEqual(row.effective_value,0)
+        self.assertEqual(row.claim_value,historical)
+
+    def test_manual_matching_and_bank_realization_of_existing_credit(self):
+        claim,_,submission,_=self._queued()
+        self.assertEqual(self._send_mocked(submission),1)
+        line=claim.claim_line_ids
+        credit=self._credit(claim,5,False)
+        credit.invoice_line_ids.purchase_line_id=False
+        credit.action_post()
+        bare=self._proposal(claim,credit,50)
+        bare.action_submit()
+        with self.assertRaisesRegex(ValidationError,'independently verified evidence'),self.env.cr.savepoint():
+            bare.with_user(self.reviewer).action_accounts()
+        evidence=self.env['supplier.shortage.claim.evidence'].with_user(self.maker).create({
+            'claim_id':claim.id,'supplier_response_submission_id':submission.id,
+            'scope_line_ids':[Command.set(line.ids)],'evidence_type':'supplier_confirmation',
+            'description':'Supplier sent exact credit attribution for the documented claim and vendor credit source.',
+            'filename':'attribution.txt','upload_data':base64.b64encode(b'Vendor confirms this credit applies to the specific shortage claim.'),
+            'verification_note':'The supplier, document reference and exact claim scope have been checked.',
+        })
+        from .preparation_fixtures import verify_document
+        verify_document(evidence)
+        wizard=self.env['supplier.shortage.credit.matching'].with_user(self.maker).create({
+            'claim_line_id':line.id,'credit_line_id':credit.invoice_line_ids.id,
+            'purpose':'shortage','source_amount':50,'evidence_id':evidence.id,
+            'note':'Supplier attributed the posted credit to this exact line of the submitted shortage.',
+        })
+        action=wizard.action_propose()
+        row=self.env[CREDIT].with_user(self.maker).browse(action['res_id'])
+        self.assertEqual(row.state,'draft')
+        self._review(row).action_verify()
+        self.assertEqual(row.realization,'open')
+        bank=self.env['account.journal'].create({
+            'name':'Disposable supplier refund bank','code':'S16B','type':'bank','company_id':self.company.id})
+        statement=self.env['account.bank.statement.line'].create({
+            'payment_ref':'Independent bank confirmation of the existing supplier credit',
+            'date':credit.date,'journal_id':bank.id,'partner_id':self.supplier.id,
+            'amount':50,'counterpart_account_id':self.accounts[self.company.id]['payable'].id,
+        })
+        self.assertEqual(statement.move_id.state,'posted')
+        (credit | statement.move_id).line_ids.filtered(
+            lambda item:item.account_id.account_type=='liability_payable').reconcile()
+        self.assertEqual(row.realization,'cash')
+        self.assertEqual(row.effective_value,50)
+        self.assertEqual(claim.verified_recovery_amount,50)
+
+    def test_draft_source_line_removal_preserves_proposal_history(self):
+        claim=self._claim(self._order(10))
+        credit=self._credit(claim,2,False)
+        row=self._proposal(claim,credit,20)
+        move_line_id=credit.invoice_line_ids.id
+        row.action_submit()
+        credit.invoice_line_ids.unlink()
+        self.assertFalse(row.credit_line_id)
+        self.assertEqual(row.source_status,'review')
+        self.assertEqual(row.effective_value,0)
+        self.assertIn(move_line_id,[event.valuation_basis.get('credit_line') for event in row.audit_ids])
