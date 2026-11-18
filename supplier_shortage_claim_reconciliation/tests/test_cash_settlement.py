@@ -122,6 +122,12 @@ class TestCashSettlement(CreditSettlementCase):
         refund.action_reverse()
         self.assertEqual(refund.realized_snapshot,60)
         self.assertTrue(refund.audit_ids)
+        correction=credit_doc._reverse_moves([{'date':credit_doc.date,'invoice_date':credit_doc.invoice_date}])
+        correction.action_post()
+        self.assertEqual(offset.realized_value,0)
+        self.assertEqual(line.total_resolution,0)
+        self.assertEqual(line.payable_realization,0)
+        self.assertEqual(line.settlement_unresolved_value,150)
 
     def test_inbound_payment_requires_its_native_bank_match(self):
         claim,_=self._approved()
@@ -140,6 +146,12 @@ class TestCashSettlement(CreditSettlementCase):
             'partner_type':'supplier','payment_type':'inbound','partner_id':claim.partner_id.id,
             'amount':60,'date':statement.date,'currency_id':statement.currency_id.id,
         })
+        self.assertEqual(payment.state,'draft')
+        draft_source=payment.move_id.line_ids.filtered(lambda item:item.balance<0)[:1]
+        with self.assertRaises((ValidationError,AccessError)),self.env.cr.savepoint():
+            draft=self._cash(claim,draft_source,60,kind='credit',bank=statement,payment_id=payment.id,credit_id=credit.id)
+            draft.action_submit()
+            draft.with_user(self.reviewer).action_accounts()
         payment.action_post()
         liquidity,payable,_=payment._seek_for_lines()
         self.assertEqual(payment.move_id.state,'posted')
@@ -160,6 +172,23 @@ class TestCashSettlement(CreditSettlementCase):
         bank_counterpart.remove_move_reconcile()
         self.assertEqual(row.realized_value,0)
         self.assertEqual(claim.verified_recovery_amount,60)
+        payable.remove_move_reconcile()
+        payment.action_cancel()
+        self.assertEqual(payment.state,'canceled')
+        self.assertEqual(row.realized_value,0)
+        method_out=statement.journal_id.outbound_payment_method_line_ids[:1]
+        method_out.payment_account_id=clearing
+        outbound=self.env['account.payment'].create({
+            'company_id':company.id,'journal_id':statement.journal_id.id,'payment_method_line_id':method_out.id,
+            'partner_type':'supplier','payment_type':'outbound','partner_id':claim.partner_id.id,
+            'amount':60,'date':statement.date,'currency_id':statement.currency_id.id,
+        })
+        outbound.action_post()
+        outgoing=outbound._seek_for_lines()[0]
+        with self.assertRaises((ValidationError,AccessError)),self.env.cr.savepoint():
+            wrong=self._cash(claim,outgoing,60,kind='credit',bank=statement,payment_id=outbound.id,credit_id=credit.id)
+            wrong.action_submit()
+            wrong.with_user(self.reviewer).action_accounts()
 
     def test_direct_foreign_currency_and_rate_amendment(self):
         claim,evidence=self._direct_evidence()

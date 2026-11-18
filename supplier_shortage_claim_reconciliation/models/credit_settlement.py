@@ -151,8 +151,11 @@ def _mark_credit_roots(env, ids):
         FROM updated
     """, [tuple(ids),env.uid])
     env[MODEL].invalidate_model(['source_dirty','effective_value','source_status','available_source','realization'],flush=False)
+    env['supplier.shortage.cash.settlement'].invalidate_model(
+        ['source_status','effective_value','realized_value'],flush=False)
     env['supplier.shortage.claim.line'].invalidate_model(
-        ['credit_value','settlement_unresolved_value','settlement_review'],flush=False)
+        ['credit_value','settlement_unresolved_value','settlement_review','total_resolution',
+         'remaining_realization','cash_realization','payable_realization'],flush=False)
     env['supplier.shortage.claim'].invalidate_model(['verified_recovery_amount','audit_event_ids'],flush=False)
 
 

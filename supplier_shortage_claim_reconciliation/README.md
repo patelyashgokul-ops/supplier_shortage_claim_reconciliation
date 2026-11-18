@@ -1447,13 +1447,20 @@ documents and reconciliation relationships under Odoo Accounting control.
 
 Unknown or ambiguous transactions stay in review. Direct refunds require
 a separate non-payable bank counterpart. Credit-linked payment matching
-currently needs a single fully traced bank leg and a unique payable match in
-a common source currency. Ambiguous counterpart splits, unidentified fees or
+requires a single fully traced bank leg and a common source currency. When
+several native payable matches exist, the preparer selects the precise
+reconciliation record. Each matched portion has its own capacity. Ambiguous counterpart splits, unidentified fees or
 exchange differences, and receipts without bank proof remain under review. The
 recorded gross amount, separately evidenced untaxed amount, and posted company
 carrying value stay separate.
 For existing credits, the Step 16 source status remains informational until
 a scoped realization is verified here.
+
+Claim resolution equals effective goods plus effective credits plus independent
+direct cash. Unresolved value is the approved untaxed amount less that total.
+Credit realization equals verified credit-linked cash plus verified payable
+offsets. Remaining credit realization is effective credit less those two
+realization amounts. Supplier commitments stay in a separate position.
 
 Run local verification on the existing disposable databases.
 
