@@ -1407,7 +1407,10 @@ module folder.
 ## STEP 17 — Cash and payable recovery
 
 Open **Supplier Recovery → Settlements → Cash and Payable Recovery** to match
-existing Odoo accounting or bank records. Open **Financial Recovery Ledger** to
+existing Odoo accounting or bank records. **Cash Refund Matching** checks source evidence,
+previews the valuation, and saves or submits a draft. Finance confirmation
+uses the existing reviewed allocation and repeats its transactional checks.
+Open **Financial Recovery Ledger** to
 inspect goods, credit, and cash allocations in one read-only view. Each entry
 links to its original allocation. The claim's **Financial Settlements** tab
 uses the same effective amounts and shows realization separately.
@@ -1423,7 +1426,10 @@ resolved non-payable counterpart and verified supplier evidence of the
 claim-specific untaxed amount. Gross cash uses native statement and accounting
 line limits. Claim recovery uses the evidenced untaxed amount and documented
 rates on the bank date. Direct cash shares the approved claim limit with goods
-and credits. A bank source can be split across claims within its actual balance.
+and credits. A bank source can be split across claims within its actual balance. A mixed
+receipt uses separate direct and credit-linked rows when the native direct
+and payable counterparts are distinguishable and the payable legs are fully
+matched to posted supplier credits.
 
 A credit-linked refund uses the native payable reconciliation against the
 existing allocated credit. A supplier payment additionally needs a confirmed
@@ -1442,8 +1448,10 @@ documents and reconciliation relationships under Odoo Accounting control.
 Unknown or ambiguous transactions stay in review. Direct refunds require
 a separate non-payable bank counterpart. Credit-linked payment matching
 currently needs a single fully traced bank leg and a unique payable match in
-a common source currency. Mixed statement counterparts, ambiguous reconciliation
-graphs, and receipts without bank proof do not become bank-confirmed.
+a common source currency. Ambiguous counterpart splits, unidentified fees or
+exchange differences, and receipts without bank proof remain under review. The
+recorded gross amount, separately evidenced untaxed amount, and posted company
+carrying value stay separate.
 For existing credits, the Step 16 source status remains informational until
 a scoped realization is verified here.
 

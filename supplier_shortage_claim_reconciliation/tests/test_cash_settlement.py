@@ -178,3 +178,72 @@ class TestCashSettlement(CreditSettlementCase):
         self.assertTrue(row.source_dirty)
         self.assertEqual(row.effective_value,0)
         self.assertEqual(row.claim_value,value)
+
+    def test_wizard_and_mixed_bank_components(self):
+        claim,evidence=self._direct_evidence()
+        accounts=self.accounts[claim.company_id.id]
+        credit_doc=self._credit(claim,6)
+        credit=self._review(self._proposal(claim,credit_doc,60))
+        credit.action_verify()
+        journal=self.env['account.journal'].create({
+            'name':'Disposable mixed bank','code':'S17M','type':'bank','company_id':claim.company_id.id})
+        def item(account,balance):
+            return Command.create({'name':'Verified mixed refund component','account_id':account.id,
+                'partner_id':claim.partner_id.id,'currency_id':claim.currency_id.id,
+                'balance':balance,'amount_currency':balance})
+        bank=self.env['account.bank.statement.line'].create({
+            'payment_ref':'Supplier split refund','journal_id':journal.id,'partner_id':claim.partner_id.id,
+            'date':claim.claim_date,'amount':80,'line_ids':[
+                item(journal.default_account_id,80),item(accounts['payable'],-60),item(accounts['expense'],-20)],
+        })
+        payable=bank.move_id.line_ids.filtered(lambda row:row.account_id==accounts['payable'])
+        direct=bank.move_id.line_ids.filtered(lambda row:row.account_id==accounts['expense'])
+        wizard_model=self.env['supplier.shortage.cash.match.wizard'].with_user(self.maker)
+        values={'claim_line_id':claim.claim_line_ids.id,'source_line_id':direct.id,'bank_id':bank.id,'kind':'direct',
+                'evidence_id':evidence.id,'gross_amount':20,'untaxed_amount':20,
+                'note':'The independently verified supplier terms designate only the expense component as direct cash.'}
+        wizard=wizard_model.create(values)
+        with self.assertRaises(ValidationError),self.env.cr.savepoint():
+            wizard.action_check_source()
+        (payable | credit_doc.line_ids.filtered(lambda row:row.account_id==accounts['payable'])).reconcile()
+        self.assertEqual(wizard.action_check_source()['tag'],'display_notification')
+        self.assertEqual(wizard.action_preview()['tag'],'display_notification')
+        draft=self.env[CASH].browse(wizard.action_save_draft()['res_id'])
+        self.assertEqual(draft.state,'draft')
+        submitted=self.env[CASH].browse(wizard.action_submit()['res_id'])
+        submitted.with_user(self.reviewer).action_accounts()
+        confirmer=wizard_model.with_user(self.finance).create(dict(values,settlement_id=submitted.id))
+        self.assertEqual(confirmer.action_confirm()['res_id'],submitted.id)
+        realized=self._review(self._cash(claim,payable,40,kind='credit',bank=bank,credit_id=credit.id))
+        realized.action_verify()
+        line=claim.claim_line_ids
+        self.assertEqual((line.total_resolution,line.cash_value,line.cash_realization,line.remaining_realization),(80,20,40,20))
+        unrelated=self._claim(self._order(10,warehouse=self.other_wh),user=self.multi)
+        foreign=self._bank(unrelated,10,self.accounts[self.other.id]['expense'])
+        with self.assertRaises((AccessError,ValidationError)),self.env.cr.savepoint():
+            wizard_model.create(dict(values,source_line_id=foreign._seek_for_lines()[2].id,bank_id=foreign.id))
+
+    def test_realization_is_explicit_across_claims_sharing_one_credit(self):
+        candidate=self._candidates()
+        first,_=self._approved(candidates=candidate,quantity=8)
+        second,_=self._approved(candidates=candidate,quantity=7)
+        credit_note=self._credit(first,10)
+        a=self._review(self._proposal(first,credit_note,40))
+        b=self._review(self._proposal(second,credit_note,60))
+        a.action_verify()
+        b.action_verify()
+        payable=self.accounts[first.company_id.id]['payable']
+        bank=self._bank(first,50,payable)
+        counterpart=bank._seek_for_lines()[2]
+        (counterpart | credit_note.line_ids.filtered(lambda item:item.account_id==payable)).reconcile()
+        first_cash=self._review(self._cash(first,counterpart,30,kind='credit',bank=bank,credit_id=a.id))
+        first_cash.action_verify()
+        over=self._review(self._cash(second,counterpart,25,kind='credit',bank=bank,credit_id=b.id))
+        with self.assertRaisesRegex(ValidationError,'unallocated capacity'),self.env.cr.savepoint():
+            over.action_verify()
+        self.assertFalse(over.audit_ids.filtered(lambda event:event.change_summary=='Cash or payable settlement verified'))
+        second_cash=self._review(self._cash(second,counterpart,20,kind='credit',bank=bank,credit_id=b.id))
+        second_cash.action_verify()
+        self.assertEqual(first.claim_line_ids.cash_realization,30)
+        self.assertEqual(second.claim_line_ids.cash_realization,20)
+        self.assertEqual((first.verified_recovery_amount,second.verified_recovery_amount),(40,60))

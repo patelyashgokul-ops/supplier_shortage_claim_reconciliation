@@ -66,7 +66,7 @@ def _mark_cash_sources(env,ids,companies):
     """,[ids,ids,ids,env.uid])
     env[MODEL].invalidate_model(['source_dirty','effective_value','realized_value','source_status'],flush=False)
     env['supplier.shortage.claim.line'].invalidate_model(
-        ['cash_value','cash_realization','payable_realization','settlement_unresolved_value','settlement_review'],flush=False)
+        ['cash_value','cash_realization','payable_realization','settlement_unresolved_value','settlement_review','total_resolution','remaining_realization'],flush=False)
     env['supplier.shortage.claim'].invalidate_model(['verified_recovery_amount','audit_event_ids'],flush=False)
 
 
@@ -679,6 +679,7 @@ class CashMatchingWizard(models.TransientModel):
     _name='supplier.shortage.cash.match.wizard'
     _description='Cash Refund Matching'
 
+    settlement_id=fields.Many2one(MODEL)
     claim_line_id=fields.Many2one('supplier.shortage.claim.line',required=True)
     source_line_id=fields.Many2one('account.move.line',required=True)
     bank_id=fields.Many2one('account.bank.statement.line')
@@ -702,7 +703,7 @@ class CashMatchingWizard(models.TransientModel):
 
     def _check_links(self):
         for wizard in self:
-            for field in ('claim_line_id','source_line_id','bank_id','payment_id','credit_id','evidence_id'):
+            for field in ('claim_line_id','source_line_id','bank_id','payment_id','credit_id','evidence_id','settlement_id'):
                 record=wizard[field]
                 if record:
                     record.check_access('read')
@@ -757,6 +758,16 @@ class CashMatchingWizard(models.TransientModel):
     def action_submit(self):
         row=self.env[MODEL].create(self._proposal())
         row.action_submit()
+        return self._open(row)
+
+    def action_confirm(self):
+        self._proposal()
+        row=self.settlement_id
+        fields_to_match=('claim_line_id','source_line_id','bank_id','payment_id','credit_id','evidence_id',
+                         'kind','gross_amount','untaxed_amount')
+        if not row or any(row[name]!=self[name] for name in fields_to_match):
+            raise ValidationError('Select the finance-reviewed allocation for this claim and source.')
+        row.action_verify()
         return self._open(row)
 
     def _open(self,row):

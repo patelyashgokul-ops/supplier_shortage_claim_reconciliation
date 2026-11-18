@@ -103,8 +103,8 @@
                 <button name="action_open_cash" type="object" string="Cash and Payable Settlements" class="btn-secondary"/>
             </xpath>
             <xpath expr="//field[@name='credit_summary_line_ids']/list/field[@name='credit_value']" position="after">
-                <field name="cash_value" string="Direct Cash"/><field name="cash_realization" string="Credit Bank Realization"/>
-                <field name="payable_realization" string="Credit Payable Offset"/>
+                <field name="cash_value" string="Direct Cash"/><field name="total_resolution" string="Total Resolution"/><field name="cash_realization" string="Credit Bank Realization"/>
+                <field name="payable_realization" string="Credit Payable Offset"/><field name="remaining_realization" string="Credit Realization Remaining"/>
             </xpath>
             <xpath expr="//page[@name='financial_settlements']/field[@name='credit_allocation_ids']" position="after">
                 <field name="cash_settlement_ids"><list create="false" delete="false">
@@ -142,4 +142,45 @@
         <field name="view_mode">list</field><field name="search_view_id" ref="view_recovery_ledger_search"/>
     </record>
     <menuitem id="menu_recovery_ledger" name="Financial Recovery Ledger" parent="menu_settlements" action="action_recovery_ledger" sequence="85"/>
+    <record id="view_cash_matching_wizard" model="ir.ui.view">
+        <field name="name">supplier.shortage.cash.match.wizard.form</field>
+        <field name="model">supplier.shortage.cash.match.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Cash Refund Matching">
+                <group>
+                    <group string="Claim Position">
+                        <field name="claim_line_id" options="{'no_create': True}"/>
+                        <field name="company_id"/><field name="supplier_id"/><field name="currency_id"/>
+                        <field name="approved"/><field name="goods"/><field name="credit"/><field name="cash"/>
+                        <field name="review"/><field name="unresolved" invisible="review"/>
+                    </group>
+                    <group string="Native Sources">
+                        <field name="kind"/>
+                        <field name="source_line_id" options="{'no_create': True}" domain="[('company_id','=',company_id),('balance','&lt;',0)]"/>
+                        <field name="payment_id" options="{'no_create': True}" domain="[('company_id','=',company_id)]"/>
+                        <field name="bank_id" options="{'no_create': True}" domain="[('company_id','=',company_id)]"/>
+                        <field name="credit_id" options="{'no_create': True}" domain="[('claim_line_id','=',claim_line_id)]"/>
+                        <field name="evidence_id" options="{'no_create': True}"/>
+                        <field name="source_currency_id"/><field name="gross_amount"/>
+                        <field name="untaxed_amount" invisible="kind!='direct'"/>
+                        <field name="settlement_id" domain="[('claim_line_id','=',claim_line_id),('source_line_id','=',source_line_id),('state','=','finance')]" groups="supplier_shortage_claim_reconciliation.group_finance_manager"/>
+                    </group>
+                </group>
+                <group><field name="note"/></group>
+                <footer>
+                    <button name="action_check_source" type="object" string="Check Source" class="btn-secondary"/>
+                    <button name="action_preview" type="object" string="Preview Allocation" class="btn-secondary"/>
+                    <button name="action_save_draft" type="object" string="Save Draft" class="btn-secondary" groups="supplier_shortage_claim_reconciliation.group_claim_user"/>
+                    <button name="action_submit" type="object" string="Submit for Verification" class="btn-primary" groups="supplier_shortage_claim_reconciliation.group_claim_user"/>
+                    <button name="action_confirm" type="object" string="Confirm Reviewed Allocation" invisible="not settlement_id" class="btn-primary" groups="supplier_shortage_claim_reconciliation.group_finance_manager"/>
+                    <button string="Cancel" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+    <record id="action_cash_matching_wizard" model="ir.actions.act_window">
+        <field name="name">Cash Refund Matching</field><field name="res_model">supplier.shortage.cash.match.wizard</field>
+        <field name="view_mode">form</field><field name="target">new</field>
+    </record>
+    <menuitem id="menu_cash_matching_wizard" name="Cash Refund Matching" parent="menu_settlements" action="action_cash_matching_wizard" sequence="81"/>
 </odoo>
