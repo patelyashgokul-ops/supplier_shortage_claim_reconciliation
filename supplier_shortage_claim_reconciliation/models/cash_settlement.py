@@ -1,4 +1,4 @@
-﻿"""Read-only allocations of native supplier bank and payable evidence."""
+ï»¿"""Read-only allocations of native supplier bank and payable evidence."""
 import hashlib
 import json
 import math
@@ -38,7 +38,6 @@ def version_cash(env, companies):
 def cash_source_changed(env, moves, companies=()):
     if not env.registry.ready or not (moves or companies):
         return
-    bank=env['account.bank.statement.line']
     relevant=moves.filtered(lambda move: move.statement_line_id or move.origin_payment_id
         or move.move_type in ('in_invoice','in_refund') or move.reversed_entry_id)
     roots=relevant | relevant.reversed_entry_id
@@ -96,7 +95,8 @@ class CashSettlement(models.Model):
     realized_snapshot=fields.Monetary(readonly=True,aggregator=False,copy=False)
     effective_value=fields.Monetary(compute='_position',aggregator=False)
     realized_value=fields.Monetary(compute='_position',aggregator=False)
-    source_status=fields.Selection([('review','Requires review'),('posted','Accounting posted'),
+    source_status=fields.Selection([('review','Requires review'),('recorded','Payment recorded'),
+        ('posted','Accounting posted'),('transit','Payment awaiting bank match'),('available','Bank evidence available'),
         ('bank','Bank confirmed'),('offset','Payable offset confirmed')],compute='_position')
     evidence_id=fields.Many2one('supplier.shortage.claim.evidence',check_company=True,ondelete='restrict')
     note=fields.Text(required=True)
@@ -422,8 +422,12 @@ class CashSettlement(models.Model):
             row.source_status='review'
             row.effective_value=row.realized_value=0
             try:
-                if row.source_move_id.state=='posted':
+                if row.payment_id:
+                    row.source_status='transit' if row.source_move_id.state=='posted' else 'recorded'
+                elif row.source_move_id.state=='posted':
                     row.source_status='posted'
+                if row.bank_id and row.bank_id.move_id.state=='posted':
+                    row.source_status='available'
                 fingerprint,_,_,_=row._evidence()
                 row.source_status='offset' if row.kind=='offset' else 'bank'
                 claim=row.claim_id

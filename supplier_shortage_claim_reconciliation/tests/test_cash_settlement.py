@@ -1,4 +1,4 @@
-﻿import base64
+import base64
 
 from odoo import Command
 from odoo.exceptions import AccessError, ValidationError
@@ -90,7 +90,7 @@ class TestCashSettlement(CreditSettlementCase):
         refund.with_user(self.reviewer).action_accounts()
         refund.with_user(self.finance).action_verify()
         bill_payable=credit.original_bill_id.line_ids.filtered(lambda item:item.account_id==payable)
-        (bill_payable | credit_payable).reconcile()
+        self.env['account.move.line'].browse((bill_payable | credit_payable).ids).reconcile()
         offset=self._review(self._cash(claim,bill_payable,40,kind='offset',credit_id=credit.id))
         offset.action_verify()
         line=claim.claim_line_ids
