@@ -98,7 +98,11 @@ def credit_hold(line):
                coalesce(bool_or(currency_id != %s),false)
         FROM supplier_shortage_credit_allocation WHERE claim_line_id=%s AND state='verified'
     """, [line.currency_id.id,line.id])
-    credit,quantity,conflict=line.env.cr.fetchone()
+    return line.env.cr.fetchone()
+
+
+def financial_hold(line):
+    credit,quantity,conflict=credit_hold(line)
     from .cash_settlement import cash_hold
     cash,cash_conflict=cash_hold(line)
     return credit+cash,quantity,conflict or cash_conflict
@@ -460,8 +464,8 @@ class CreditAllocation(models.Model):
             FROM supplier_shortage_replacement WHERE claim_line_id=%s AND state='verified'
         """,[cycle.currency_id.id,self.claim_line_id.id])
         goods_value,goods_qty,goods_conflict=self.env.cr.fetchone()
-        credits,credit_qty,credit_conflict=credit_hold(self.claim_line_id)
-        if (goods_conflict or credit_conflict or cycle.currency_id.compare_amounts(goods_value+credits+amount,basis['amount'])>0
+        financial,credit_qty,credit_conflict=financial_hold(self.claim_line_id)
+        if (goods_conflict or credit_conflict or cycle.currency_id.compare_amounts(goods_value+financial+amount,basis['amount'])>0
                 or self.env['uom.uom'].browse(basis['uom_id']).compare(goods_qty+credit_qty+qty,basis['quantity'])>0):
             raise ValidationError('Combined goods and credit exceed the approved claim capacity.')
         subtotal=self.credit_line_id.price_subtotal

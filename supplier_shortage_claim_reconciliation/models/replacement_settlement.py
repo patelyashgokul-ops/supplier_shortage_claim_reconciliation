@@ -438,10 +438,10 @@ class Replacement(models.Model):
             raise ValidationError('The allocation exceeds the linked promise. Document any exceptional excess separately.')
         # Cumulative rounding keeps partial recoveries within the frozen line amount.
         value = currency.round(currency.round(basis['amount'] * (claim_used + qty) / basis['quantity']) - value_used)
-        from .credit_settlement import credit_hold
-        credit_value, credit_qty, credit_currency_conflict = credit_hold(self.claim_line_id)
+        from .credit_settlement import financial_hold
+        financial_value, credit_qty, credit_currency_conflict = financial_hold(self.claim_line_id)
         if (credit_currency_conflict or value < 0
-                or currency.compare_amounts(value_used + value + credit_value, basis['amount']) > 0
+                or currency.compare_amounts(value_used + value + financial_value, basis['amount']) > 0
                 or uom.compare(claim_used + qty + credit_qty, basis['quantity']) > 0):
             raise ValidationError('The remaining approved value needs finance reconciliation.')
         # Version the claim row shared with native source invalidation and claim workflows.

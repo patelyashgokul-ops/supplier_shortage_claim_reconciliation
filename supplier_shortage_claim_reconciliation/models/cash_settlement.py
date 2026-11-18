@@ -8,7 +8,7 @@ from odoo.exceptions import AccessError, ValidationError
 from odoo.fields import Domain
 
 from .claim_preparation import ROLE, lock_records
-from .credit_settlement import accounting_corrections, approved_basis, credit_hold, dated_fx, version_credit
+from .credit_settlement import accounting_corrections, approved_basis, dated_fx, financial_hold, version_credit
 from .shortage_claim_audit import ShortageClaimAudit
 
 MODEL = 'supplier.shortage.cash.settlement'
@@ -108,6 +108,8 @@ class CashSettlement(models.Model):
     source_currency_id=fields.Many2one(related='source_line_id.currency_id',compute_sudo=False)
     currency_id=fields.Many2one('res.currency',readonly=True,copy=False)
     frozen_source_currency_id=fields.Many2one('res.currency',readonly=True,copy=False)
+    company_currency_id=fields.Many2one('res.currency',readonly=True,copy=False)
+    company_amount=fields.Monetary(currency_field='company_currency_id',readonly=True,copy=False,aggregator=False)
     gross_amount=fields.Monetary(currency_field='source_currency_id',required=True,aggregator=False)
     untaxed_amount=fields.Monetary(currency_field='source_currency_id',aggregator=False)
     claim_value=fields.Monetary(readonly=True,aggregator=False,copy=False)
@@ -345,6 +347,9 @@ class CashSettlement(models.Model):
         self._transition({'state':'finance','source_dirty':False,'source_fingerprint':fp,'partial_id':partial.id,
             'accounts_by':self.env.uid,'approval_id':cycle.id,'currency_id':cycle.currency_id.id,
             'frozen_source_currency_id':self.source_currency_id.id,'fx_basis':fx,'accounting_date':self.source_move_id.date,
+            'company_currency_id':self.company_id.currency_id.id,
+            'company_amount':self.company_id.currency_id.round(
+                abs(self.source_line_id.balance*self.gross_amount/self.source_line_id.amount_currency)),
             'bank_date':self.bank_id.date},'Accounts confirmed source, classification and valuation')
 
     def action_verify(self):
@@ -355,7 +360,8 @@ class CashSettlement(models.Model):
             raise AccessError('A separate Finance reviewer must authorize this settlement.')
         cycle,basis,fp,partial,cap,bank_amount,fx,claim_value=self._valuation()
         if (self.source_dirty or self.source_fingerprint!=fp or self.approval_id!=cycle or self.fx_basis!=fx
-                or self.frozen_source_currency_id!=self.source_currency_id):
+                or self.frozen_source_currency_id!=self.source_currency_id
+                or self.company_currency_id!=self.company_id.currency_id):
             raise ValidationError('The source or approval changed. Request an Accounts recheck.')
         self.flush_model(['state','gross_amount','realized_snapshot','source_line_id','bank_id','credit_id','partial_id',
                           'claim_line_id','frozen_source_currency_id'])
@@ -389,7 +395,7 @@ class CashSettlement(models.Model):
                 FROM supplier_shortage_replacement WHERE claim_line_id=%s AND state='verified'
             """,[currency.id,self.claim_line_id.id])
             goods_value,wrong_currency=self.env.cr.fetchone()
-            financial,_,conflict=credit_hold(self.claim_line_id)
+            financial,_,conflict=financial_hold(self.claim_line_id)
             if wrong_currency or conflict or currency.compare_amounts(goods_value+financial+claim_value,basis['amount'])>0:
                 raise ValidationError('Combined goods, credit and direct cash exceed the approved claim capacity.')
             realized_value=claim_value
@@ -471,6 +477,7 @@ class CashSettlement(models.Model):
                 'bank':self.bank_id.id,'credit':self.credit_id.id,'partial':self.partial_id.id,
                 'gross':self.gross_amount,'untaxed':self.untaxed_amount,'claim_value':self.claim_value,
                 'realized':self.realized_snapshot,'currency':self.currency_id.id,
+                'company_amount':self.company_amount,'company_currency':self.company_currency_id.id,
                 'source_currency':(self.frozen_source_currency_id or self.source_currency_id).id,
                 'fingerprint':self.source_fingerprint,'fx':self.fx_basis,'reversals':self.reversal_ids.ids,
             },

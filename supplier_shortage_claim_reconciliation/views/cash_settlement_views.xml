@@ -73,7 +73,7 @@
                         <group string="Amounts">
                             <field name="source_currency_id"/><field name="gross_amount" readonly="state != 'draft'"/>
                             <field name="untaxed_amount" readonly="state != 'draft'" invisible="kind != 'direct'"/>
-                            <field name="currency_id"/><field name="effective_value"/><field name="realized_value"/>
+                            <field name="company_currency_id"/><field name="company_amount"/><field name="currency_id"/><field name="effective_value"/><field name="realized_value"/>
                         </group>
                         <group string="Review History">
                             <field name="accounts_by"/><field name="verified_by"/><field name="verified_at"/>
