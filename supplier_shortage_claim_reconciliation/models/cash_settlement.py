@@ -43,8 +43,12 @@ def cash_source_changed(env, moves, companies=()):
     roots=relevant | relevant.reversed_entry_id
     if not roots and not companies:
         return
-    version_cash(env,list(companies)+roots.company_id.ids)
-    if not roots:
+    _mark_cash_sources(env,roots.ids,list(companies)+roots.company_id.ids)
+
+
+def _mark_cash_sources(env,ids,companies):
+    version_cash(env,companies)
+    if not ids:
         return
     env[MODEL].flush_model(['source_move_id','bank_move_id','credit_move_id','state','source_dirty'])
     env.cr.execute("""
@@ -59,11 +63,26 @@ def cash_source_changed(env, moves, companies=()):
         SELECT claim_id,company_id,id,'cash_event',%s,statement_timestamp() AT TIME ZONE 'UTC',
                'Cash or payable source requires revalidation',json_build_object('fingerprint',source_fingerprint)
         FROM changed
-    """,[roots.ids,roots.ids,roots.ids,env.uid])
+    """,[ids,ids,ids,env.uid])
     env[MODEL].invalidate_model(['source_dirty','effective_value','realized_value','source_status'],flush=False)
     env['supplier.shortage.claim.line'].invalidate_model(
         ['cash_value','cash_realization','payable_realization','settlement_unresolved_value','settlement_review'],flush=False)
     env['supplier.shortage.claim'].invalidate_model(['verified_recovery_amount','audit_event_ids'],flush=False)
+
+
+def cash_rates_changed(env,rate_ids):
+    if not env.registry.ready or not rate_ids:
+        return
+    env[MODEL].flush_model(['fx_basis','kind','state','source_move_id','company_id'])
+    env.cr.execute("""
+        SELECT DISTINCT source_move_id,company_id FROM supplier_shortage_cash_settlement allocation
+        WHERE allocation.kind='direct' AND allocation.state IN ('finance','verified') AND EXISTS (
+            SELECT 1 FROM unnest(%s::integer[]) rate(id)
+            WHERE allocation.fx_basis @> jsonb_build_object('rates',jsonb_build_array(jsonb_build_object('id',rate.id)))
+        )
+    """,[rate_ids])
+    rows=env.cr.fetchall()
+    _mark_cash_sources(env,[move for move,_company in rows if move],[company for _move,company in rows if company])
 
 
 class CashSettlement(models.Model):
@@ -558,3 +577,74 @@ class CashBankStatement(models.Model):
         if values.keys() & {'date','amount','amount_currency','foreign_currency_id','partner_id','journal_id','move_id'}:
             cash_source_changed(self.env,self.move_id)
         return result
+
+class RecoveryLedger(models.Model):
+    """A read-only view over the three authoritative allocation models."""
+    _name='supplier.shortage.recovery.ledger'
+    _description='Financial Recovery Ledger'
+    _auto=False
+    _rec_name='claim_id'
+    _order='event_date desc, id desc'
+
+    claim_id=fields.Many2one('supplier.shortage.claim',readonly=True)
+    claim_line_id=fields.Many2one('supplier.shortage.claim.line',readonly=True)
+    company_id=fields.Many2one('res.company',readonly=True)
+    currency_id=fields.Many2one('res.currency',readonly=True)
+    replacement_id=fields.Many2one('supplier.shortage.replacement',readonly=True)
+    credit_id=fields.Many2one('supplier.shortage.credit.allocation',readonly=True)
+    cash_id=fields.Many2one(MODEL,readonly=True)
+    settlement_type=fields.Selection([('goods','Replacement goods'),('credit','Vendor credit'),
+        ('direct','Direct cash'),('credit_cash','Credit cash realization'),('offset','Credit payable offset'),
+        ('other','Unclassified cash proposal')],readonly=True)
+    state=fields.Char(readonly=True)
+    event_date=fields.Datetime(readonly=True)
+    historical_value=fields.Monetary(readonly=True,aggregator=False)
+    effective_value=fields.Monetary(compute='_amounts',aggregator=False)
+    realization_value=fields.Monetary(compute='_amounts',aggregator=False)
+
+    def init(self):
+        from odoo.tools import drop_view_if_exists
+        drop_view_if_exists(self.env.cr,self._table)
+        self.env.cr.execute("""
+            CREATE VIEW supplier_shortage_recovery_ledger AS
+            SELECT r.id::bigint*4+1 AS id,r.claim_id,r.claim_line_id,r.company_id,r.currency_id,
+                   r.id AS replacement_id,NULL::integer AS credit_id,NULL::integer AS cash_id,
+                   'goods'::varchar AS settlement_type,r.state,coalesce(r.reversed_at,r.verified_at,r.create_date) AS event_date,
+                   r.verified_goods_value AS historical_value
+            FROM supplier_shortage_replacement r
+            UNION ALL
+            SELECT c.id::bigint*4+2,c.claim_id,c.claim_line_id,c.company_id,c.currency_id,NULL,c.id,NULL,
+                   'credit',c.state,coalesce(c.reversed_at,c.verified_at,c.create_date),c.claim_value
+            FROM supplier_shortage_credit_allocation c
+            UNION ALL
+            SELECT s.id::bigint*4+3,s.claim_id,s.claim_line_id,s.company_id,s.currency_id,NULL,NULL,s.id,
+                   CASE s.kind WHEN 'credit' THEN 'credit_cash' WHEN 'offset' THEN 'offset'
+                               WHEN 'direct' THEN 'direct' ELSE 'other' END,
+                   s.state,coalesce(s.reversed_at,s.verified_at,s.create_date),s.claim_value
+            FROM supplier_shortage_cash_settlement s
+        """)
+
+    def _access_domain(self,operation):
+        source=Domain.FALSE
+        for name in ('replacement_id','credit_id','cash_id'):
+            source |= Domain(name,'!=',False) & Domain(name,'access','read')
+        return super()._access_domain(operation) & source & Domain('claim_line_id','access','read')
+
+    @api.depends_context('uid','allowed_company_ids')
+    def _amounts(self):
+        for row in self:
+            allocation=row._allocation()
+            allocation.check_access('read')
+            row.effective_value=allocation.effective_value
+            row.realization_value=allocation.realized_value if row.cash_id else 0
+
+    def _allocation(self):
+        return self.replacement_id or self.credit_id or self.cash_id
+
+    def action_open_source(self):
+        self.ensure_one()
+        self.check_access('read')
+        allocation=self._allocation()
+        allocation.check_access('read')
+        return {'type':'ir.actions.act_window','res_model':allocation._name,'res_id':allocation.id,
+                'views':[(False,'form')]}

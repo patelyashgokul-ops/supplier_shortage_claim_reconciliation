@@ -817,7 +817,10 @@ class CreditCurrencyRate(models.Model):
         """,[self.ids])
         # Only source identities are propagated, even for a rate editor without
         # access to the underlying accounting records.
-        _mark_credit_roots(self.env,[row[0] for row in self.env.cr.fetchall() if row[0]])
+        sources=[row[0] for row in self.env.cr.fetchall() if row[0]]
+        from .cash_settlement import cash_rates_changed
+        cash_rates_changed(self.env,self.ids)
+        _mark_credit_roots(self.env,sources)
 
     def write(self, values):
         if values.keys() & {'rate','company_rate','inverse_company_rate','currency_id','company_id','name'}:

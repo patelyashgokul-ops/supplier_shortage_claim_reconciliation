@@ -1,4 +1,4 @@
-﻿<odoo>
+<odoo>
     <record id="view_cash_search" model="ir.ui.view">
         <field name="name">supplier.shortage.cash.search</field>
         <field name="model">supplier.shortage.cash.settlement</field>
@@ -115,4 +115,31 @@
             </xpath>
         </field>
     </record>
+    <record id="view_recovery_ledger_list" model="ir.ui.view">
+        <field name="name">supplier.shortage.recovery.ledger.list</field>
+        <field name="model">supplier.shortage.recovery.ledger</field>
+        <field name="arch" type="xml">
+            <list create="false" edit="false" delete="false">
+                <field name="event_date"/><field name="claim_id"/><field name="claim_line_id" optional="show"/>
+                <field name="company_id" groups="base.group_multi_company"/><field name="settlement_type"/>
+                <field name="state" widget="badge"/><field name="currency_id"/><field name="historical_value" optional="hide"/>
+                <field name="effective_value"/><field name="realization_value"/>
+                <button name="action_open_source" type="object" string="Open Allocation"/>
+            </list>
+        </field>
+    </record>
+    <record id="view_recovery_ledger_search" model="ir.ui.view">
+        <field name="name">supplier.shortage.recovery.ledger.search</field>
+        <field name="model">supplier.shortage.recovery.ledger</field>
+        <field name="arch" type="xml"><search><field name="claim_id"/><field name="company_id"/>
+            <field name="settlement_type"/><field name="currency_id"/>
+            <filter name="verified" string="Verified History" domain="[('state','=','verified')]"/>
+            <filter name="reversed" string="Reversed History" domain="[('state','=','reversed')]"/>
+        </search></field>
+    </record>
+    <record id="action_recovery_ledger" model="ir.actions.act_window">
+        <field name="name">Financial Recovery Ledger</field><field name="res_model">supplier.shortage.recovery.ledger</field>
+        <field name="view_mode">list</field><field name="search_view_id" ref="view_recovery_ledger_search"/>
+    </record>
+    <menuitem id="menu_recovery_ledger" name="Financial Recovery Ledger" parent="menu_settlements" action="action_recovery_ledger" sequence="85"/>
 </odoo>

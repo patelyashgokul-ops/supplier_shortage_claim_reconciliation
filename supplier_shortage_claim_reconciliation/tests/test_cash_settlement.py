@@ -12,7 +12,7 @@ CASH='supplier.shortage.cash.settlement'
 
 class TestCashSettlement(CreditSettlementCase):
 
-    def _bank(self,claim,amount,account):
+    def _bank(self,claim,amount,account,**kwargs):
         company=claim.company_id
         journal=self.env['account.journal'].search([('company_id','=',company.id),('code','=','S17B')],limit=1)
         journal=journal or self.env['account.journal'].create({
@@ -20,7 +20,7 @@ class TestCashSettlement(CreditSettlementCase):
         return self.env['account.bank.statement.line'].create({
             'payment_ref':'Verified supplier remittance fixture','journal_id':journal.id,
             'partner_id':claim.partner_id.id,'date':claim.claim_date,'amount':amount,
-            'counterpart_account_id':account.id,
+            'counterpart_account_id':account.id,**kwargs,
         })
 
     def _cash(self,claim,source,amount,kind='direct',bank=None,**extra):
@@ -96,6 +96,10 @@ class TestCashSettlement(CreditSettlementCase):
         line=claim.claim_line_ids
         self.assertEqual((line.credit_value,line.cash_value,line.cash_realization,line.payable_realization),(100,0,60,40))
         self.assertEqual(claim.verified_recovery_amount,100)
+        ledger=self.env['supplier.shortage.recovery.ledger'].with_user(self.finance).search([('claim_id','=',claim.id)])
+        self.assertEqual(sum(ledger.mapped('effective_value')),100)
+        self.assertEqual(sum(ledger.mapped('realization_value')),100)
+        self.assertTrue(ledger.filtered(lambda item:item.cash_id==offset).action_open_source()['res_id'])
         bank_payable.remove_move_reconcile()
         self.assertEqual(refund.realized_value,0)
         self.assertEqual(offset.realized_value,40)
@@ -144,3 +148,21 @@ class TestCashSettlement(CreditSettlementCase):
         bank_counterpart.remove_move_reconcile()
         self.assertEqual(row.realized_value,0)
         self.assertEqual(claim.verified_recovery_amount,60)
+
+    def test_direct_foreign_currency_and_rate_amendment(self):
+        claim,evidence=self._direct_evidence()
+        currency=self.env['res.currency'].create({'name':'XSR','symbol':'XR','rounding':0.01})
+        rate=self.env['res.currency.rate'].create({
+            'currency_id':currency.id,'company_id':claim.company_id.root_id.id,'name':claim.claim_date,'rate':2})
+        bank=self._bank(claim,50,self.accounts[claim.company_id.id]['expense'],
+                        foreign_currency_id=currency.id,amount_currency=100)
+        row=self._cash(claim,bank._seek_for_lines()[2],80,bank=bank,evidence_id=evidence.id,untaxed_amount=70)
+        self._review(row).action_verify()
+        self.assertEqual(row.source_currency_id,currency)
+        value=currency._convert(70,claim.currency_id,claim.company_id,bank.date)
+        self.assertEqual(row.effective_value,value)
+        self.assertEqual(row.fx_basis['rates'][0]['id'],rate.id)
+        rate.rate=3
+        self.assertTrue(row.source_dirty)
+        self.assertEqual(row.effective_value,0)
+        self.assertEqual(row.claim_value,value)

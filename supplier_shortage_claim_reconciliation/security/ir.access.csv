@@ -129,3 +129,6 @@ cash_settlement_company,cash settlement company,supplier.shortage.cash.settlemen
 cash_settlement_purchase,cash proposal,supplier.shortage.cash.settlement,group_claim_user,cru,
 cash_settlement_accounts,cash review,supplier.shortage.cash.settlement,group_accounts_reviewer,ru,
 cash_settlement_finance,cash finance,supplier.shortage.cash.settlement,group_finance_manager,ru,
+recovery_ledger_company,recovery ledger company,supplier.shortage.recovery.ledger,,crud,"[('company_id','in',company_ids)]"
+recovery_ledger_purchase,recovery ledger purchase,supplier.shortage.recovery.ledger,group_claim_user,r,
+recovery_ledger_accounts,recovery ledger accounting,supplier.shortage.recovery.ledger,group_accounts_reviewer,r,
