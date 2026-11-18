@@ -9,10 +9,12 @@
                 <field name="product_id"/>
                 <field name="company_id"/>
                 <field name="stock_move_id"/>
-                <filter name="pending_receipt" string="Pending Receipt" domain="[('state','=','receipt')]"/>
-                <filter name="pending_review" string="Pending Verification" domain="[('state','in',['review','finance'])]"/>
+                <filter name="pending_receipt" string="Pending Receipt" domain="[('state','=','receipt'),('stock_move_id.state','!=','done')]"/>
+                <filter name="pending_review" string="Pending Verification" domain="['|',('state','in',['review','finance']),'&amp;',('state','=','receipt'),('stock_move_id.state','=','done')]"/>
                 <filter name="verified" string="Verified" domain="[('state','=','verified'),('source_dirty','=',False)]"/>
                 <filter name="source_review" string="Source Changed" domain="[('source_dirty','=',True),('state','in',['finance','verified'])]"/>
+                <separator/>
+                <filter name="my_verifications" string="My Verifications" domain="['|',('warehouse_by','=',uid),('verified_by','=',uid)]"/>
                 <filter name="reversed" string="Reversed" domain="[('state','=','reversed')]"/>
             </search>
         </field>
@@ -146,6 +148,42 @@
     </record>
     <menuitem id="menu_settlements" name="Settlements" parent="menu_recovery_root" sequence="50"/>
     <menuitem id="menu_replacement" name="Replacement Goods" parent="menu_settlements" action="action_replacement" sequence="10"/>
+    <record id="action_replacement_pending_receipt" model="ir.actions.act_window">
+        <field name="name">Pending Replacement Receipts</field>
+        <field name="res_model">supplier.shortage.replacement</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_replacement_search"/>
+        <field name="context">{'search_default_pending_receipt': 1}</field>
+    </record>
+    <record id="action_replacement_pending_review" model="ir.actions.act_window">
+        <field name="name">Pending Replacement Verification</field>
+        <field name="res_model">supplier.shortage.replacement</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_replacement_search"/>
+        <field name="context">{'search_default_pending_review': 1}</field>
+    </record>
+    <record id="action_replacement_verified" model="ir.actions.act_window">
+        <field name="name">Verified Goods Recovery</field>
+        <field name="res_model">supplier.shortage.replacement</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_replacement_search"/>
+        <field name="context">{'search_default_verified': 1}</field>
+    </record>
+    <record id="action_replacement_reversed" model="ir.actions.act_window">
+        <field name="name">Reversed Replacements</field>
+        <field name="res_model">supplier.shortage.replacement</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_replacement_search"/>
+        <field name="context">{'search_default_reversed': 1}</field>
+    </record>
+    <menuitem id="menu_replacement_pending_receipt" name="Pending Receipts" parent="menu_settlements"
+              action="action_replacement_pending_receipt" sequence="20"/>
+    <menuitem id="menu_replacement_pending_review" name="Pending Verification" parent="menu_settlements"
+              action="action_replacement_pending_review" sequence="30"/>
+    <menuitem id="menu_replacement_verified" name="Verified Goods Recovery" parent="menu_settlements"
+              action="action_replacement_verified" sequence="40"/>
+    <menuitem id="menu_replacement_reversed" name="Reversed Replacements" parent="menu_settlements"
+              action="action_replacement_reversed" sequence="50"/>
     <record id="view_claim_replacement" model="ir.ui.view">
         <field name="name">supplier.shortage.claim.form.replacement</field>
         <field name="model">supplier.shortage.claim</field>
@@ -155,7 +193,8 @@
                 <page name="replacement_settlement" string="Replacement Goods"
                       groups="supplier_shortage_claim_reconciliation.group_claim_user,supplier_shortage_claim_reconciliation.group_warehouse_reviewer,supplier_shortage_claim_reconciliation.group_accounts_reviewer">
                     <button name="action_open_replacements" type="object" string="Open Replacement Workbench" class="btn-secondary"/>
-                    <field name="claim_line_ids" readonly="True">
+                    <field name="claim_line_ids" readonly="True"
+                           groups="supplier_shortage_claim_reconciliation.group_claim_user,supplier_shortage_claim_reconciliation.group_accounts_reviewer">
                         <list create="false" delete="false">
                             <field name="product_id"/>
                             <field name="replacement_approved_qty" string="Approved"/>
