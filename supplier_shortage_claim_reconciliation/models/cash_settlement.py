@@ -221,6 +221,7 @@ class CashSettlement(models.Model):
             raise ValidationError('Classify the receipt before requesting financial verification.')
         partner=self.supplier_id.commercial_partner_id
         bank_amount=0
+        mixed_signature=[]
         bank_match=self.env['account.partial.reconcile']
         if self.kind=='offset':
             if bank or payment or move.move_type!='in_invoice':
@@ -264,7 +265,21 @@ class CashSettlement(models.Model):
         credit=self.credit_id
         if self.kind=='direct':
             evidence=self.evidence_id
-            if (credit or payment or len(counterparts)!=1 or line.account_id.reconcile
+            for other in counterparts-line:
+                matches=other.matched_debit_ids
+                matches.check_access('read')
+                matches.debit_move_id.check_access('read')
+                documents=matches.debit_move_id.move_id
+                documents.check_access('read')
+                if (other.account_id.account_type!='liability_payable' or other.amount_currency>=0
+                        or other.currency_id!=currency or other.partner_id.commercial_partner_id!=partner
+                        or not documents or any(doc.state!='posted' or doc.move_type!='in_refund'
+                                                or doc.commercial_partner_id!=partner for doc in documents)
+                        or currency.compare_amounts(sum(matches.mapped('credit_amount_currency')),
+                                                    abs(other.amount_currency))):
+                    raise ValidationError('Separate any unresolved payable, fee or adjustment before direct attribution.')
+                mixed_signature.append([other.id,other.amount_currency,sorted(matches.ids)])
+            if (credit or payment or line.account_id.reconcile
                     or line.account_id.account_type not in ('income_other','income','expense','expense_direct_cost')
                     or line.matched_debit_ids or line.matched_credit_ids or line.tax_ids or line.tax_line_id):
                 raise ValidationError('A direct refund requires an independent, untaxed non-payable bank counterpart.')
@@ -297,6 +312,8 @@ class CashSettlement(models.Model):
                    currency.id,currency.rounding,bank.id,str(bank.date),bank_amount,payment.id,
                    bank_match.id,partial.id,partial.amount,partial.debit_amount_currency,
                    partial.credit_amount_currency,credit.id,credit.source_fingerprint,self.kind]
+        if mixed_signature:
+            signature.append(mixed_signature)
         return hashlib.sha256(json.dumps(signature).encode()).hexdigest(),partial,cap,bank_amount
 
     def _valuation(self):
@@ -501,6 +518,8 @@ class CashClaimLine(models.Model):
     cash_value=fields.Monetary(compute='_credit_position',aggregator=False)
     cash_realization=fields.Monetary(compute='_credit_position',aggregator=False)
     payable_realization=fields.Monetary(compute='_credit_position',aggregator=False)
+    total_resolution=fields.Monetary(compute='_credit_position',aggregator=False)
+    remaining_realization=fields.Monetary(compute='_credit_position',aggregator=False)
 
 
 class CashClaim(models.Model):
@@ -655,3 +674,90 @@ class RecoveryLedger(models.Model):
         allocation.check_access('read')
         return {'type':'ir.actions.act_window','res_model':allocation._name,'res_id':allocation.id,
                 'views':[(False,'form')]}
+
+class CashMatchingWizard(models.TransientModel):
+    _name='supplier.shortage.cash.match.wizard'
+    _description='Cash Refund Matching'
+
+    claim_line_id=fields.Many2one('supplier.shortage.claim.line',required=True)
+    source_line_id=fields.Many2one('account.move.line',required=True)
+    bank_id=fields.Many2one('account.bank.statement.line')
+    payment_id=fields.Many2one('account.payment')
+    credit_id=fields.Many2one('supplier.shortage.credit.allocation')
+    evidence_id=fields.Many2one('supplier.shortage.claim.evidence')
+    kind=fields.Selection(KINDS,required=True,default='review')
+    note=fields.Text(required=True)
+    gross_amount=fields.Monetary(currency_field='source_currency_id',required=True)
+    untaxed_amount=fields.Monetary(currency_field='source_currency_id')
+    source_currency_id=fields.Many2one(related='source_line_id.currency_id',compute_sudo=False)
+    currency_id=fields.Many2one(related='claim_line_id.currency_id',compute_sudo=False)
+    company_id=fields.Many2one(related='claim_line_id.company_id',compute_sudo=False)
+    supplier_id=fields.Many2one(related='claim_line_id.claim_id.partner_id',compute_sudo=False)
+    approved=fields.Monetary(related='claim_line_id.settlement_approved_value',compute_sudo=False)
+    goods=fields.Monetary(related='claim_line_id.replacement_value',compute_sudo=False)
+    credit=fields.Monetary(related='claim_line_id.credit_value',compute_sudo=False)
+    cash=fields.Monetary(related='claim_line_id.cash_value',compute_sudo=False)
+    unresolved=fields.Monetary(related='claim_line_id.settlement_unresolved_value',compute_sudo=False)
+    review=fields.Boolean(related='claim_line_id.settlement_review',compute_sudo=False)
+
+    def _check_links(self):
+        for wizard in self:
+            for field in ('claim_line_id','source_line_id','bank_id','payment_id','credit_id','evidence_id'):
+                record=wizard[field]
+                if record:
+                    record.check_access('read')
+                    if record.company_id!=wizard.company_id:
+                        raise AccessError('Select sources in the claim company.')
+            if wizard.source_line_id.partner_id.commercial_partner_id!=wizard.supplier_id.commercial_partner_id:
+                raise ValidationError('Select a source for the claim supplier.')
+            if wizard.payment_id and wizard.payment_id.move_id!=wizard.source_line_id.move_id:
+                raise ValidationError('Select the payment that owns the source item.')
+            if wizard.credit_id and wizard.credit_id.claim_line_id!=wizard.claim_line_id:
+                raise ValidationError('Select a credit allocation for this claim line.')
+            if wizard.evidence_id and wizard.claim_line_id not in wizard.evidence_id._scope_lines():
+                raise ValidationError('Select evidence covering this claim line.')
+
+    @api.model_create_multi
+    def create(self,values):
+        records=super().create(values)
+        records._check_links()
+        return records
+
+    def write(self,values):
+        result=super().write(values)
+        self._check_links()
+        return result
+
+    def _proposal(self):
+        self.ensure_one()
+        self.check_access('read')
+        self._check_links()
+        return {key:self[key].id if self._fields[key].type=='many2one' else self[key]
+                for key in INPUTS-{'reason'}}
+
+    def action_check_source(self):
+        proposal=self.env[MODEL].new(self._proposal())
+        _,_,cap,_=proposal._evidence()
+        return self._notice(self.env._('Source verified. Eligible gross source amount before existing allocations: %s.',cap))
+
+    def action_preview(self):
+        proposal=self.env[MODEL].new(self._proposal())
+        _,_,_,_,_,_,fx,amount=proposal._valuation()
+        return self._notice(self.env._('Independent claim resolution: %(amount)s. FX date: %(date)s. Rate: %(rate)s.',
+                                       amount=amount,date=fx['date'],rate=fx['rate']))
+
+    def _notice(self,message):
+        return {'type':'ir.actions.client','tag':'display_notification',
+                'params':{'title':self.env._('Cash Refund Matching'),'message':message,'sticky':True}}
+
+    def action_save_draft(self):
+        row=self.env[MODEL].create(self._proposal())
+        return self._open(row)
+
+    def action_submit(self):
+        row=self.env[MODEL].create(self._proposal())
+        row.action_submit()
+        return self._open(row)
+
+    def _open(self,row):
+        return {'type':'ir.actions.act_window','res_model':MODEL,'res_id':row.id,'views':[(False,'form')]}

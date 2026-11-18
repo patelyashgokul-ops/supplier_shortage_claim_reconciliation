@@ -687,7 +687,9 @@ class CreditClaimLine(models.Model):
             line.cash_realization=sum(eligible.filtered(lambda row:row.kind=='credit').mapped('realized_value'))
             line.payable_realization=sum(eligible.filtered(lambda row:row.kind=='offset').mapped('realized_value'))
             incomplete=coverage.get(line.id,0)!=len(active)+len(goods_rows)+len(cash_line)
-            unsettled=line.settlement_approved_value-line.replacement_value-line.credit_value-line.cash_value
+            line.total_resolution=line.replacement_value+line.credit_value+line.cash_value
+            line.remaining_realization=line.credit_value-line.cash_realization-line.payable_realization
+            unsettled=line.settlement_approved_value-line.total_resolution
             currency=line.currency_id
             line.settlement_review=(incomplete or (currency and currency.compare_amounts(unsettled,0)<0)
                                     or any(not row.effective_value for row in active)
