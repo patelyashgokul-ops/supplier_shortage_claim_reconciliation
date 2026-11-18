@@ -1,4 +1,4 @@
-﻿"""Access-aware revision-specific supplier positions on the existing claim form."""
+"""Access-aware revision-specific supplier positions on the existing claim form."""
 from odoo import api, fields, models
 from odoo.fields import Domain
 from odoo.exceptions import AccessError
@@ -85,7 +85,7 @@ class ClaimSupplierPosition(models.Model):
             claim.supplier_rejected_amount=pos.rejected_amount if pos else 0
             claim.supplier_disputed_amount=pos.disputed_amount if pos else 0
             claim.supplier_pending_amount=pos.pending_amount if pos else amount
-            claim.verified_recovery_amount=0
+
             status='pending'
             if verified: status='acknowledged'
             if pos:

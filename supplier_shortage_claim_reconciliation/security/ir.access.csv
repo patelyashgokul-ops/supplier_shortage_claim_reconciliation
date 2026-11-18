@@ -115,3 +115,8 @@ dispute_accounts,dispute accounts visibility,supplier.shortage.claim.dispute,gro
 dispute_finance,dispute finance authority,supplier.shortage.claim.dispute,group_finance_manager,cru,
 communication_response_recorder,response communication ledger insertion,supplier.shortage.claim.communication,group_claim_user,c,
 communication_response_finance,response finance ledger insertion,supplier.shortage.claim.communication,group_finance_manager,c,
+replacement_company,replacement company scope,supplier.shortage.replacement,,crud,"[('company_id','in',company_ids)]"
+replacement_purchase,replacement proposal,supplier.shortage.replacement,group_claim_user,cru,
+replacement_warehouse,replacement warehouse review,supplier.shortage.replacement,group_warehouse_reviewer,ru,
+replacement_accounts,replacement financial visibility,supplier.shortage.replacement,group_accounts_reviewer,r,
+replacement_finance,replacement finance review,supplier.shortage.replacement,group_finance_manager,ru,
