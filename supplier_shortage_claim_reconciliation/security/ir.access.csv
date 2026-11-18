@@ -125,3 +125,7 @@ credit_allocation_purchase,credit proposal,supplier.shortage.credit.allocation,g
 credit_allocation_accounts,credit source review,supplier.shortage.credit.allocation,group_accounts_reviewer,ru,
 credit_allocation_finance,credit finance approval,supplier.shortage.credit.allocation,group_finance_manager,ru,
 credit_matching_purchase,credit matching,supplier.shortage.credit.matching,group_claim_user,crud,
+cash_settlement_company,cash settlement company,supplier.shortage.cash.settlement,,crud,"[('company_id','in',company_ids)]"
+cash_settlement_purchase,cash proposal,supplier.shortage.cash.settlement,group_claim_user,cru,
+cash_settlement_accounts,cash review,supplier.shortage.cash.settlement,group_accounts_reviewer,ru,
+cash_settlement_finance,cash finance,supplier.shortage.cash.settlement,group_finance_manager,ru,

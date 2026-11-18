@@ -266,6 +266,8 @@ class SourceAccountLine(models.Model):
         result=super().write(vals)
         if material:
             moves |= self.move_id
+            from .cash_settlement import cash_source_changed
+            cash_source_changed(self.env,moves.filtered(lambda m: m.state=='posted'))
             notify_credit_source(self.env,(products | self.filtered(lambda row:row.display_type=='product')).move_id.filtered(
                 lambda m:m.move_type=='in_refund' or m.state=='posted'))
             classify_accounting_sources(self.env,self,moves)
@@ -303,6 +305,8 @@ class SourceBill(models.Model):
         result=super().write(vals)
         if material:
             current=self.filtered(lambda m:m.move_type=='in_refund' or m.state=='posted')
+            from .cash_settlement import cash_source_changed
+            cash_source_changed(self.env,current | old_posted | old)
             notify_credit_source(self.env,current | old_posted)
             if vals.keys() & link_fields:
                 from .credit_settlement import version_credit

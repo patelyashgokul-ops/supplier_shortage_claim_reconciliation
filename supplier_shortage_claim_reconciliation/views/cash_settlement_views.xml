@@ -1,0 +1,118 @@
+﻿<odoo>
+    <record id="view_cash_search" model="ir.ui.view">
+        <field name="name">supplier.shortage.cash.search</field>
+        <field name="model">supplier.shortage.cash.settlement</field>
+        <field name="arch" type="xml">
+            <search><field name="claim_id"/><field name="supplier_id"/><field name="source_move_id"/><field name="company_id"/>
+                <filter name="pending" string="Pending Review" domain="[('state','in',['draft','accounts','finance'])]"/>
+                <filter name="verified" string="Verified" domain="[('state','=','verified'),('source_dirty','=',False)]"/>
+                <filter name="reversed" string="Reversed" domain="[('state','=','reversed')]"/>
+                <separator/><filter name="direct" string="Direct Refunds" domain="[('kind','=','direct')]"/>
+                <filter name="realization" string="Credit Realization" domain="[('kind','in',['credit','offset'])]"/>
+                <separator/><filter name="exceptions" string="Source Changed" domain="[('source_dirty','=',True)]"/>
+            </search>
+        </field>
+    </record>
+    <record id="view_cash_list" model="ir.ui.view">
+        <field name="name">supplier.shortage.cash.list</field>
+        <field name="model">supplier.shortage.cash.settlement</field>
+        <field name="arch" type="xml">
+            <list decoration-warning="source_dirty">
+                <field name="claim_id"/><field name="supplier_id"/><field name="company_id" groups="base.group_multi_company"/>
+                <field name="kind"/><field name="source_move_id"/><field name="bank_date" optional="show"/>
+                <field name="source_status" widget="badge"/><field name="gross_amount"/><field name="effective_value"/>
+                <field name="realized_value"/><field name="source_currency_id" column_invisible="True"/>
+                <field name="currency_id" column_invisible="True"/><field name="source_dirty" column_invisible="True"/>
+                <field name="state" widget="badge" decoration-success="state == 'verified' and not source_dirty"/>
+            </list>
+        </field>
+    </record>
+    <record id="view_cash_form" model="ir.ui.view">
+        <field name="name">supplier.shortage.cash.form</field>
+        <field name="model">supplier.shortage.cash.settlement</field>
+        <field name="arch" type="xml">
+            <form delete="false" duplicate="false">
+                <header>
+                    <button name="action_submit" type="object" string="Submit" class="oe_highlight"
+                            invisible="state != 'draft'" groups="supplier_shortage_claim_reconciliation.group_claim_user"/>
+                    <button name="action_accounts" type="object" string="Verify Source" class="oe_highlight"
+                            invisible="state != 'accounts'" groups="supplier_shortage_claim_reconciliation.group_accounts_reviewer"/>
+                    <button name="action_verify" type="object" string="Authorize Settlement" class="oe_highlight"
+                            invisible="state != 'finance' or source_dirty" groups="supplier_shortage_claim_reconciliation.group_finance_manager"/>
+                    <button name="action_recheck" type="object" string="Request Recheck"
+                            invisible="state != 'finance'" groups="supplier_shortage_claim_reconciliation.group_finance_manager"/>
+                    <button name="action_reverse" type="object" string="Reverse Allocation"
+                            invisible="state != 'verified'" groups="supplier_shortage_claim_reconciliation.group_finance_manager"/>
+                    <button name="action_reject" type="object" string="Reject"
+                            invisible="state not in ('draft','accounts','finance')" groups="supplier_shortage_claim_reconciliation.group_finance_manager"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,accounts,finance,verified"/>
+                </header>
+                <sheet>
+                    <div class="alert alert-warning" role="alert" invisible="not source_dirty or state == 'reversed'">
+                        The accounting evidence changed. Review the source documents and record a correction.
+                    </div>
+                    <group>
+                        <group string="Claim and Allocation">
+                            <field name="claim_id"/><field name="claim_line_id" readonly="state != 'draft'" options="{'no_create':True}"/>
+                            <field name="company_id"/><field name="supplier_id"/><field name="kind" readonly="state != 'draft'"/>
+                            <field name="credit_id" readonly="state != 'draft'" options="{'no_create':True}"
+                                   domain="[('claim_line_id','=',claim_line_id),('state','=','verified')]"/>
+                            <field name="evidence_id" readonly="state != 'draft'" options="{'no_create':True}"/>
+                        </group>
+                        <group string="Accounting Evidence">
+                            <field name="source_line_id" required="state == 'draft'" readonly="state != 'draft'"
+                                   domain="[('company_id','=',company_id),('balance','&lt;',0)]" options="{'no_create':True}"/>
+                            <field name="source_move_id"/><field name="payment_id" readonly="state != 'draft'" options="{'no_create':True}"/>
+                            <field name="bank_id" readonly="state != 'draft'" options="{'no_create':True}"
+                                   domain="[('company_id','=',company_id),('amount','&gt;',0)]"/>
+                            <field name="source_status" widget="badge"/><field name="accounting_date"/><field name="bank_date"/>
+                            <field name="partial_id"/><field name="source_dirty" invisible="True"/>
+                        </group>
+                    </group>
+                    <group>
+                        <group string="Amounts">
+                            <field name="source_currency_id"/><field name="gross_amount" readonly="state != 'draft'"/>
+                            <field name="untaxed_amount" readonly="state != 'draft'" invisible="kind != 'direct'"/>
+                            <field name="currency_id"/><field name="effective_value"/><field name="realized_value"/>
+                        </group>
+                        <group string="Review History">
+                            <field name="accounts_by"/><field name="verified_by"/><field name="verified_at"/>
+                            <field name="reversed_at"/><field name="reversal_ids" widget="many2many_tags"/>
+                        </group>
+                    </group>
+                    <group><field name="note" readonly="state != 'draft'"/><field name="reason" readonly="state in ('reversed','rejected')"/></group>
+                    <notebook><page string="Settlement Audit"><field name="audit_ids">
+                        <list create="false" delete="false"><field name="event_datetime"/><field name="actor_id"/>
+                            <field name="change_summary"/><field name="reason"/></list>
+                    </field></page></notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="action_cash_settlement" model="ir.actions.act_window">
+        <field name="name">Cash and Payable Recovery</field><field name="res_model">supplier.shortage.cash.settlement</field>
+        <field name="view_mode">list,form</field><field name="search_view_id" ref="view_cash_search"/>
+    </record>
+    <menuitem id="menu_cash_settlement" name="Cash and Payable Recovery" parent="menu_settlements" action="action_cash_settlement" sequence="80"/>
+    <record id="view_claim_cash_summary" model="ir.ui.view">
+        <field name="name">supplier.shortage.claim.cash.summary</field>
+        <field name="model">supplier.shortage.claim</field>
+        <field name="inherit_id" ref="view_claim_credit_summary"/>
+        <field name="arch" type="xml">
+            <xpath expr="//page[@name='financial_settlements']/button[@name='action_open_credits']" position="after">
+                <button name="action_open_cash" type="object" string="Cash and Payable Settlements" class="btn-secondary"/>
+            </xpath>
+            <xpath expr="//field[@name='credit_summary_line_ids']/list/field[@name='credit_value']" position="after">
+                <field name="cash_value" string="Direct Cash"/><field name="cash_realization" string="Credit Bank Realization"/>
+                <field name="payable_realization" string="Credit Payable Offset"/>
+            </xpath>
+            <xpath expr="//page[@name='financial_settlements']/field[@name='credit_allocation_ids']" position="after">
+                <field name="cash_settlement_ids"><list create="false" delete="false">
+                    <field name="kind"/><field name="source_move_id"/><field name="source_status"/>
+                    <field name="currency_id" column_invisible="True"/><field name="effective_value"/>
+                    <field name="realized_value"/><field name="state"/>
+                </list></field>
+            </xpath>
+        </field>
+    </record>
+</odoo>

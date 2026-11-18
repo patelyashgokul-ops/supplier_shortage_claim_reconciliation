@@ -637,13 +637,17 @@ class CreditClaimLine(models.Model):
     settlement_review=fields.Boolean(compute='_credit_position')
 
     @api.depends('credit_allocation_ids.effective_value','credit_allocation_ids.state','replacement_value',
-                 'replacement_unresolved_value','claim_id.approval_cycle')
+                 'replacement_unresolved_value','claim_id.approval_cycle','cash_settlement_ids.effective_value',
+                 'cash_settlement_ids.realized_value','cash_settlement_ids.state')
     @api.depends_context('uid','allowed_company_ids')
     def _credit_position(self):
         model=self.env[MODEL]
         rows=model.search([('claim_line_id','in',self.ids),('state','in',('verified','reversed'))]).grouped(
             'claim_line_id') if model.has_access('read') else {}
         goods=self.env['supplier.shortage.replacement']
+        cash=self.env['supplier.shortage.cash.settlement']
+        cash_rows=cash.search([('claim_line_id','in',self.ids),('state','=','verified')]).grouped('claim_line_id') if cash.has_access('read') else {}
+        cash.flush_model(['claim_line_id','state'])
         model.flush_model(['claim_line_id','state'])
         goods.flush_model(['claim_line_id','state'])
         self.env.cr.execute("""
@@ -652,8 +656,10 @@ class CreditClaimLine(models.Model):
                   AND claim_line_id=ANY(%s)
                 UNION ALL SELECT claim_line_id FROM supplier_shortage_replacement WHERE state='verified'
                   AND claim_line_id=ANY(%s)
+                UNION ALL SELECT claim_line_id FROM supplier_shortage_cash_settlement WHERE state='verified'
+                  AND claim_line_id=ANY(%s)
             ) held GROUP BY claim_line_id
-        """,[self.ids,self.ids])
+        """,[self.ids,self.ids,self.ids])
         coverage=dict(self.env.cr.fetchall())
         visible_goods=goods.search([('claim_line_id','in',self.ids),('state','=','verified')]).grouped(
             'claim_line_id') if goods.has_access('read') else {}
@@ -671,12 +677,18 @@ class CreditClaimLine(models.Model):
                 lambda row:row.state=='reversed' and row.currency_id==line.currency_id).mapped('claim_value'))
             basis=frozen.get(line.id,{})
             line.settlement_approved_value=basis.get('amount',0)
-            incomplete=coverage.get(line.id,0)!=len(active)+len(goods_rows)
-            unsettled=line.settlement_approved_value-line.replacement_value-line.credit_value
+            cash_line=cash_rows.get(line,cash.browse())
+            eligible=cash_line.filtered(lambda row:row.currency_id==line.currency_id)
+            line.cash_value=sum(eligible.filtered(lambda row:row.kind=='direct').mapped('effective_value'))
+            line.cash_realization=sum(eligible.filtered(lambda row:row.kind=='credit').mapped('realized_value'))
+            line.payable_realization=sum(eligible.filtered(lambda row:row.kind=='offset').mapped('realized_value'))
+            incomplete=coverage.get(line.id,0)!=len(active)+len(goods_rows)+len(cash_line)
+            unsettled=line.settlement_approved_value-line.replacement_value-line.credit_value-line.cash_value
             currency=line.currency_id
             line.settlement_review=(incomplete or (currency and currency.compare_amounts(unsettled,0)<0)
                                     or any(not row.effective_value for row in active)
-                                    or any(not row.effective_qty for row in goods_rows))
+                                    or any(not row.effective_qty for row in goods_rows)
+                                    or any(not row.realized_value for row in cash_line))
             line.settlement_unresolved_value=currency.round(unsettled) if currency and not incomplete else 0
 
 

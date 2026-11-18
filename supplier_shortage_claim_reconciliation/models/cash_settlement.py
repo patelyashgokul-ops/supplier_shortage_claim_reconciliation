@@ -412,3 +412,145 @@ class CashSettlement(models.Model):
         if self.state in ('verified','reversed','rejected') or len((self.reason or '').strip())<20:
             raise ValidationError('Document the rejection of an unverified allocation.')
         self._transition({'state':'rejected'},'Cash allocation rejected')
+
+    @api.depends('state','source_dirty','claim_value','realized_snapshot','claim_id.state','claim_id.approval_status',
+                 'claim_id.approval_cycle','claim_id.replacement_conflict_cycle','credit_id.effective_value',
+                 'source_move_id.state','bank_id.is_reconciled','payment_id.state','partial_id','evidence_id.effective_state')
+    @api.depends_context('uid','allowed_company_ids')
+    def _position(self):
+        for row in self:
+            row.source_status='review'
+            row.effective_value=row.realized_value=0
+            try:
+                if row.source_move_id.state=='posted':
+                    row.source_status='posted'
+                fingerprint,_,_,_=row._evidence()
+                row.source_status='offset' if row.kind=='offset' else 'bank'
+                claim=row.claim_id
+                if (row.state=='verified' and not row.source_dirty and fingerprint==row.source_fingerprint
+                        and claim.state=='under_review' and claim.approval_status in ('approved','stale')
+                        and claim.approval_cycle==row.approval_id.number
+                        and claim.replacement_conflict_cycle!=row.approval_id.number):
+                    row.effective_value=row.claim_value
+                    row.realized_value=row.realized_snapshot
+            except (AccessError,ValidationError):
+                continue
+
+    def _audit(self,message,before):
+        self.check_access('read')
+        audit=self.env['supplier.shortage.claim.audit']
+        super(ShortageClaimAudit,audit.sudo().with_context({})).create({
+            'claim_id':self.claim_id.id,'company_id':self.company_id.id,'cash_settlement_id':self.id,
+            'event_type':'cash_event','actor_id':self.env.uid,'event_datetime':fields.Datetime.now(),
+            'change_summary':message,'reason':self.reason or self.note,'valuation_basis':{
+                'old_state':before,'state':self.state,'kind':self.kind,'line':self.claim_line_id.id,
+                'move':self.source_move_id.id,'move_line':self.source_line_id.id,'payment':self.payment_id.id,
+                'bank':self.bank_id.id,'credit':self.credit_id.id,'partial':self.partial_id.id,
+                'gross':self.gross_amount,'untaxed':self.untaxed_amount,'claim_value':self.claim_value,
+                'realized':self.realized_snapshot,'currency':self.currency_id.id,
+                'source_currency':(self.frozen_source_currency_id or self.source_currency_id).id,
+                'fingerprint':self.source_fingerprint,'fx':self.fx_basis,'reversals':self.reversal_ids.ids,
+            },
+        })
+
+
+class CashAudit(models.Model):
+    _inherit='supplier.shortage.claim.audit'
+    cash_settlement_id=fields.Many2one(MODEL,readonly=True,index=True,ondelete='restrict')
+    event_type=fields.Selection(selection_add=[('cash_event','Cash and Payable Settlement')],
+                                ondelete={'cash_event':lambda rows:None})
+
+    def _access_domain(self,operation):
+        return super()._access_domain(operation) & (
+            Domain('cash_settlement_id','=',False) | Domain('cash_settlement_id','access','read'))
+
+
+class CashClaimLine(models.Model):
+    _inherit='supplier.shortage.claim.line'
+    cash_settlement_ids=fields.One2many(MODEL,'claim_line_id',readonly=True,copy=False)
+    cash_value=fields.Monetary(compute='_credit_position',aggregator=False)
+    cash_realization=fields.Monetary(compute='_credit_position',aggregator=False)
+    payable_realization=fields.Monetary(compute='_credit_position',aggregator=False)
+
+
+class CashClaim(models.Model):
+    _inherit='supplier.shortage.claim'
+    cash_settlement_ids=fields.One2many(MODEL,'claim_id',readonly=True,copy=False)
+
+    @api.model_create_multi
+    def create(self,values):
+        if any('cash_settlement_ids' in vals for vals in values) or 'default_cash_settlement_ids' in self.env.context:
+            raise AccessError('Open the Cash Recovery workbench to manage settlements.')
+        return super().create(values)
+
+    def write(self,values):
+        if 'cash_settlement_ids' in values:
+            raise AccessError('Open the Cash Recovery workbench to manage settlements.')
+        return super().write(values)
+
+    @api.depends('replacement_ids.effective_value','supplier_position_currency_id','replacement_conflict_cycle',
+                 'credit_allocation_ids.effective_value','cash_settlement_ids.effective_value')
+    @api.depends_context('uid','allowed_company_ids')
+    def _compute_verified_recovery(self):
+        super()._compute_verified_recovery()
+        model=self.env[MODEL]
+        if model.has_access('read'):
+            grouped=model.search([('claim_id','in',self.ids),('state','=','verified'),('kind','=','direct')]).grouped('claim_id')
+            for claim in self:
+                claim.verified_recovery_amount+=sum(grouped.get(claim,model.browse()).filtered(
+                    lambda row:row.currency_id==claim.supplier_position_currency_id).mapped('effective_value'))
+
+    def action_open_cash(self):
+        self.ensure_one()
+        self.check_access('read')
+        self.env[MODEL].check_access('read')
+        action=self.env['ir.actions.act_window']._for_xml_id(ROLE+'action_cash_settlement')
+        action['domain']=[('claim_id','=',self.id)]
+        if len(self.claim_line_ids)==1:
+            action['context']={'default_claim_line_id':self.claim_line_ids.id}
+        return action
+
+
+class CashPartialReconcile(models.Model):
+    _inherit='account.partial.reconcile'
+
+    @api.model_create_multi
+    def create(self,values):
+        records=super().create(values)
+        if self.env.registry.ready:
+            moves=(records.credit_move_id | records.debit_move_id).move_id
+            version_cash(self.env,moves.company_id.ids)
+            self.env[MODEL].invalidate_model(['source_status','effective_value','realized_value'],flush=False)
+        return records
+
+    def unlink(self):
+        moves=(self.credit_move_id | self.debit_move_id).move_id
+        if self.env.registry.ready:
+            cash_source_changed(self.env,moves-moves.filtered(lambda m:m.move_type=='in_refund'),
+                                companies=moves.company_id.ids)
+        result=super().unlink()
+        if self.env.registry.ready:
+            self.env[MODEL].invalidate_model(['partial_id','source_status','effective_value','realized_value'],flush=False)
+        return result
+
+
+class CashPayment(models.Model):
+    _inherit='account.payment'
+
+    def write(self,values):
+        material=values.keys() & {'state','date','journal_id','payment_type','partner_type','partner_id','currency_id','move_id','amount'}
+        prior=self.move_id if material else self.env['account.move']
+        result=super().write(values)
+        if material:
+            cash_source_changed(self.env,prior | self.move_id)
+        return result
+
+
+class CashBankStatement(models.Model):
+    _inherit='account.bank.statement.line'
+
+    def write(self,values):
+        result=super().write(values)
+        if values.keys() & {'date','amount','amount_currency','foreign_currency_id','partner_id','journal_id','move_id'}:
+            cash_source_changed(self.env,self.move_id)
+        return result
