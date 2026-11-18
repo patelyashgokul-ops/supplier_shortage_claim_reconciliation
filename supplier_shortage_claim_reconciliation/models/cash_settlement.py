@@ -588,6 +588,17 @@ class CashPartialReconcile(models.Model):
             self.env[MODEL].invalidate_model(['partial_id','reconcile_match_id','source_status','effective_value','realized_value'],flush=False)
         return result
 
+    def write(self,values):
+        material=values.keys() & {'debit_move_id','credit_move_id','amount','debit_amount_currency','credit_amount_currency'}
+        if not material or not self.env.registry.ready:
+            return super().write(values)
+        previous=(self.credit_move_id | self.debit_move_id).move_id
+        result=super().write(values)
+        moves=previous | (self.credit_move_id | self.debit_move_id).move_id
+        cash_source_changed(self.env,moves.filtered(lambda move:move.move_type!='in_refund'),
+                            companies=moves.company_id.ids)
+        return result
+
 
 class CashPayment(models.Model):
     _inherit='account.payment'

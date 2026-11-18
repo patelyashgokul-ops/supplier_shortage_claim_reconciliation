@@ -134,3 +134,4 @@ recovery_ledger_purchase,recovery ledger purchase,supplier.shortage.recovery.led
 recovery_ledger_accounts,recovery ledger accounting,supplier.shortage.recovery.ledger,group_accounts_reviewer,r,
 cash_matching_purchase,cash matching wizard,supplier.shortage.cash.match.wizard,group_claim_user,crud,
 cash_matching_finance,cash matching finance wizard,supplier.shortage.cash.match.wizard,group_finance_manager,crud,
+cash_matching_accounts,cash matching accounts wizard,supplier.shortage.cash.match.wizard,group_accounts_reviewer,crud,
