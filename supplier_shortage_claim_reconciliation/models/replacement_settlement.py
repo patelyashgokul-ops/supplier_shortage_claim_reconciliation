@@ -12,6 +12,7 @@ from .claim_preparation import ROLE, lock_records
 MODEL = 'supplier.shortage.replacement'
 INPUTS = {'claim_line_id', 'stock_move_id', 'stock_move_line_id', 'commitment_id',
           'evidence_id', 'source_qty', 'substitute_claim_qty', 'note', 'decision_reason', 'supersedes_id'}
+TERMS_GROUPS = ROLE + 'group_claim_user,' + ROLE + 'group_accounts_reviewer'
 STATES = [('draft', 'Draft'), ('receipt', 'Pending Receipt'), ('review', 'Pending Warehouse Review'),
           ('finance', 'Pending Finance Review'), ('verified', 'Verified'), ('rejected', 'Rejected'),
           ('reversed', 'Reversed')]
@@ -46,7 +47,7 @@ class Replacement(models.Model):
     warehouse_id = fields.Many2one(related='stock_move_id.picking_type_id.warehouse_id', compute_sudo=False)
     product_id = fields.Many2one(related='stock_move_id.product_id', compute_sudo=False)
     source_uom_id = fields.Many2one(related='stock_move_id.uom_id', compute_sudo=False)
-    commitment_id = fields.Many2one('supplier.shortage.claim.commitment', ondelete='restrict', check_company=True)
+    commitment_id = fields.Many2one('supplier.shortage.claim.commitment', ondelete='restrict', check_company=True, groups=TERMS_GROUPS)
     evidence_id = fields.Many2one('supplier.shortage.claim.evidence', string='Supplier Settlement Evidence',
                                   ondelete='restrict', check_company=True)
     supersedes_id = fields.Many2one(MODEL, string='Corrects Reversed Allocation',
@@ -78,8 +79,8 @@ class Replacement(models.Model):
     audit_ids = fields.One2many('supplier.shortage.claim.audit', 'replacement_id', readonly=True, copy=False)
     effective_qty = fields.Float(compute='_effective', digits=0, aggregator=False)
     effective_value = fields.Monetary(compute='_effective', aggregator=False)
-    remaining_promise_qty = fields.Float(compute='_promise_position', digits=0, aggregator=False)
-    promised_qty = fields.Float(compute='_promise_position', digits=0, aggregator=False)
+    remaining_promise_qty = fields.Float(compute='_promise_position', digits=0, aggregator=False, groups=TERMS_GROUPS)
+    promised_qty = fields.Float(compute='_promise_position', digits=0, aggregator=False, groups=TERMS_GROUPS)
 
     _unique_active_source = models.Constraint(
         'UNIQUE(claim_id, active_move_id)', 'An effective or suspended allocation already uses this movement for this claim.')
@@ -135,7 +136,11 @@ class Replacement(models.Model):
     def unlink(self):
         raise AccessError('Replacement history is retained. Reject or reverse the allocation.')
 
-    def _check_proposal(self):
+    def _can_read_terms(self):
+        return (self.env.user.has_group(ROLE + 'group_claim_user')
+                or self.env.user.has_group(ROLE + 'group_accounts_reviewer'))
+
+    def _check_proposal(self, *, check_terms=True):
         self.ensure_one()
         self.check_access('read')
         move = self.stock_move_id
@@ -176,7 +181,7 @@ class Replacement(models.Model):
         if self.evidence_id and (self.evidence_id.claim_id != self.claim_id or
                 self.evidence_id.claim_line_id and self.evidence_id.claim_line_id != line):
             raise ValidationError('Supplier evidence must support the selected claim line.')
-        if self.commitment_id:
+        if check_terms and self.commitment_id:
             self.commitment_id.check_access('read')
             if (self.commitment_id.claim_line_id != line or self.commitment_id.commitment_type != 'replacement'
                     or self.commitment_id.committed_qty <= 0):
@@ -192,7 +197,7 @@ class Replacement(models.Model):
         return cycle, row
 
     def _physical_basis(self):
-        self._check_proposal()
+        self._check_proposal(check_terms=False)
         move = self.stock_move_id
         if move.state != 'done' or move.picking_id.state != 'done':
             raise ValidationError('Warehouse review requires a validated receipt.')
@@ -263,7 +268,7 @@ class Replacement(models.Model):
                 or row['quantity'] <= 0 or uom != line.purchase_line_id.uom_id
                 or uom.factor != row['uom_factor'] or uom.compare(row['quantity'], line.allocated_qty)):
             raise ValidationError('An applicable approved claim snapshot is required.')
-        if claim.purchase_source_status != 'current':
+        if claim.replacement_conflict_cycle == cycle.number or claim.purchase_source_status != 'current':
             raise ValidationError('The approved purchase source requires reconciliation.')
         bill = self.env['account.move.line'].browse(row['bill_line_id'])
         bill.check_access('read')
@@ -275,6 +280,13 @@ class Replacement(models.Model):
             raise ValidationError('The approved billing basis has changed.')
         bills = line.purchase_line_id.invoice_lines
         bills.check_access('read')
+        billing = line.purchase_line_id._ssc_billing_analysis()[line.purchase_line_id.id]
+        if not billing['accessible'] or not billing['complete']:
+            raise ValidationError('The current bill and credit provenance requires financial reconciliation.')
+        reversals = bill.move_id.reversal_move_ids
+        reversals.check_access('read')
+        if any(move.state != 'cancel' for move in reversals):
+            raise ValidationError('A reversal of the approved bill requires financial reconciliation.')
         if any(b != bill and b.display_type == 'product' and b.move_id.state != 'cancel'
                and b.move_id.move_type in ('in_invoice', 'in_refund') for b in bills):
             raise ValidationError('A related bill or credit requires independent financial reconciliation.')
@@ -328,7 +340,8 @@ class Replacement(models.Model):
         lock_records(self.claim_id.purchase_id)
         lock_records(self.claim_id)
         lock_records(self.claim_line_id)
-        lock_records(self.commitment_id)
+        if self._can_read_terms():
+            lock_records(self.commitment_id)
         lock_records(self)
         self.env.invalidate_all()
         self.check_access('write')
@@ -433,7 +446,7 @@ class Replacement(models.Model):
         if self.state == 'reversed':
             return
         if self.state != 'verified' or self.env.user == self.create_uid or len((self.decision_reason or '').strip()) < 20:
-            raise ValidationError('Reversal requires a verified allocation and an independent reviewerÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢s documented reason.')
+            raise ValidationError('Reversal requires a verified allocation and an independent reviewerÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢s documented reason.')
         self.env.cr.execute('UPDATE supplier_shortage_claim SET write_date = write_date WHERE id = %s', [self.claim_id.id])
         self._transition({'state': 'reversed', 'active_move_id': False, 'reversed_at': fields.Datetime.now()},
                          'Recovery reversed')
@@ -458,14 +471,15 @@ class Replacement(models.Model):
         }
 
     @api.depends('state', 'source_dirty', 'allocated_qty', 'verified_goods_value', 'claim_id.state',
-                 'claim_id.approval_cycle', 'claim_id.approval_status', 'commitment_id.status',
+                 'claim_id.approval_cycle', 'claim_id.approval_status', 'claim_id.replacement_conflict_cycle', 'commitment_id.status',
                  'commitment_id.submission_id.superseded', 'evidence_id.effective_state',
                  'commitment_id.response_id.verification_state')
     @api.depends_context('uid', 'allowed_company_ids')
     def _effective(self):
         for row in self:
-            effective = (row.state == 'verified' and not row.source_dirty and row.claim_id.state == 'under_review'
+            effective = (row._can_read_terms() and row.state == 'verified' and not row.source_dirty and row.claim_id.state == 'under_review'
                          and row.claim_id.approval_cycle == row.approval_id.number
+                         and row.claim_id.replacement_conflict_cycle != row.approval_id.number
                          and row.claim_id.approval_status in ('approved', 'stale')
                          and (not row.evidence_id or row.evidence_id.effective_state == 'verified')
                          and (not row.commitment_id or (row.commitment_id.has_access('read')
@@ -547,7 +561,7 @@ class ReplacementAudit(models.Model):
             'reason': row.decision_reason or row.note,
             'valuation_basis': {'previous_state': old, 'state': row.state, 'line': row.claim_line_id.id,
                 'move': row.stock_move_id.id, 'move_line': row.stock_move_line_id.id, 'supplier': row.supplier_id.id,
-                'commitment': row.commitment_id.id, 'evidence': row.evidence_id.id, 'corrects': row.supersedes_id.id,
+                'commitment': row.commitment_id.id if row._can_read_terms() else False, 'evidence': row.evidence_id.id, 'corrects': row.supersedes_id.id,
                 'source_quantity': row.source_qty, 'source_uom': row.source_uom_id.id,
                 'claim_uom': row.claim_uom_id.id, 'quantity': row.allocated_qty,
                 'value': row.verified_goods_value, 'currency': row.currency_id.id,
@@ -559,11 +573,25 @@ class ReplacementClaim(models.Model):
     _inherit = 'supplier.shortage.claim'
 
     replacement_ids = fields.One2many(MODEL, 'claim_id', readonly=True, copy=False)
+    replacement_conflict_cycle = fields.Integer(readonly=True, copy=False)
+
+    @api.model_create_multi
+    def create(self, values):
+        if any('replacement_conflict_cycle' in vals for vals in values):
+            raise AccessError('Replacement source review is system controlled.')
+        if 'default_replacement_conflict_cycle' in self.env.context:
+            raise AccessError('Replacement source review is system controlled.')
+        return super().create(values)
+
+    def write(self, values):
+        if 'replacement_conflict_cycle' in values:
+            raise AccessError('Replacement source review is system controlled.')
+        return super().write(values)
     verified_recovery_amount = fields.Monetary(
         compute='_compute_verified_recovery', currency_field='supplier_position_currency_id',
         help='Effective verified replacement goods in the claim currency.')
 
-    @api.depends('replacement_ids.effective_value', 'supplier_position_currency_id')
+    @api.depends('replacement_ids.effective_value', 'supplier_position_currency_id', 'replacement_conflict_cycle')
     @api.depends_context('uid', 'allowed_company_ids')
     def _compute_verified_recovery(self):
         rows = self.env[MODEL].search([('claim_id', 'in', self.ids), ('state', '=', 'verified')])

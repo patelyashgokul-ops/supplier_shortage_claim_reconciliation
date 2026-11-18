@@ -44,9 +44,10 @@ class SupplierSubmissionCase(PreparationCase):
         self.smtp_guard=patch.object(type(self.env['ir.mail_server']),'_connect__',side_effect=AssertionError('Real SMTP forbidden in STEP 13 tests'))
         self.smtp_guard.start(); self.addCleanup(self.smtp_guard.stop)
 
-    def _approved(self, chain='purchase', products=None, reason=None, duplicate=False, stop_before=None, internal=False):
+    def _approved(self, chain='purchase', products=None, reason=None, duplicate=False, stop_before=None,
+                  internal=False, candidates=None, quantity=None):
         self.approval_policy.write({'approval_chain':chain})
-        claim=self._prepare(self._candidates(products=products))
+        claim=self._prepare(candidates or self._candidates(products=products), quantity=quantity)
         claim.shortage_reason=reason or 'Verified delivery shortage supported by posted billing and warehouse reconciliation'
         evidence=self._evidence(claim,upload=True)
         evidence.verification_note='Independently checked delivery-specific warehouse evidence'

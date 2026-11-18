@@ -74,13 +74,13 @@
                             <field name="claim_id"/>
                             <field name="claim_line_id" readonly="state != 'draft'" options="{'no_create': True}"/>
                             <field name="supplier_id"/>
-                            <field name="commitment_id" readonly="state != 'draft'"
+                            <field name="commitment_id" groups="supplier_shortage_claim_reconciliation.group_claim_user,supplier_shortage_claim_reconciliation.group_accounts_reviewer" readonly="state != 'draft'"
                                    domain="[('claim_line_id','=',claim_line_id),('commitment_type','=','replacement')]"
                                    options="{'no_create': True}"/>
                             <field name="evidence_id" readonly="state != 'draft'"
                                    domain="[('claim_line_id','=',claim_line_id)]" options="{'no_create': True}"/>
-                            <field name="promised_qty" invisible="not commitment_id"/>
-                            <field name="remaining_promise_qty" invisible="not commitment_id"/>
+                            <field name="promised_qty" groups="supplier_shortage_claim_reconciliation.group_claim_user,supplier_shortage_claim_reconciliation.group_accounts_reviewer" invisible="not commitment_id"/>
+                            <field name="remaining_promise_qty" groups="supplier_shortage_claim_reconciliation.group_claim_user,supplier_shortage_claim_reconciliation.group_accounts_reviewer" invisible="not commitment_id"/>
                         </group>
                         <group string="Physical Receipt">
                             <field name="company_id" groups="base.group_multi_company"/>

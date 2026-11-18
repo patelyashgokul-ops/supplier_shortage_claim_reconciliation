@@ -19,8 +19,8 @@ class TestReplacementSettlement(SupplierSubmissionCase):
             company_id=cls.company.id, company_ids=[Command.set(cls.company.ids)])
         cls.warehouse = independent_checker(cls.env, cls.company)
 
-    def _promised(self, quantity=12):
-        claim, _, sub, _ = self._queued()
+    def _promised(self, quantity=12, **approval):
+        claim, _, sub, _ = self._queued(**approval)
         self.assertEqual(self._send_mocked(sub), 1)
         line = claim.claim_line_ids
         response = self.env['supplier.shortage.claim.response'].with_user(self.maker).create({
@@ -165,3 +165,22 @@ class TestReplacementSettlement(SupplierSubmissionCase):
         self.assertEqual(row.effective_value, claim.currency_id.round(claim.verified_amount * 3 / 15))
         self.assertEqual(row.source_received_qty, 4)
         self.assertFalse(source.purchase_line_id)
+
+
+    def test_one_receipt_split_across_partial_claims(self):
+        candidate = self._candidates()
+        first, first_promise = self._promised(8, candidates=candidate, quantity=8)
+        second, second_promise = self._promised(7, candidates=candidate, quantity=7)
+        self.assertNotEqual(first, second)
+        move = additional_receipt(first.purchase_id, 10).move_ids
+        allocated = self._draft(first, first_promise, move, 6)
+        self._review(allocated)
+        allocated.with_user(self.finance).action_verify()
+        over = self._draft(second, second_promise, move, 5)
+        self._review(over)
+        with self.assertRaisesRegex(ValidationError, 'insufficient unallocated'), self.env.cr.savepoint():
+            over.with_user(self.finance).action_verify()
+        valid = self._draft(second, second_promise, move, 4)
+        self._review(valid)
+        valid.with_user(self.finance).action_verify()
+        self.assertEqual(allocated.effective_qty + valid.effective_qty, 10)

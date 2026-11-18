@@ -59,6 +59,18 @@ def invalidate_lines(env, line_ids, reason, kind='all'):
 
 def invalidate_approvals(env, line_ids, reason):
     """Identity-only notification sharing the native source transaction/row locks."""
+    if (env.registry.ready and 'Material receiving source changed' not in reason
+            and 'Material candidate source changed' not in reason):
+        env['supplier.shortage.claim'].flush_model(['approval_cycle', 'replacement_conflict_cycle'])
+        env.cr.execute('''
+            UPDATE supplier_shortage_claim c SET replacement_conflict_cycle = c.approval_cycle
+            WHERE c.approval_cycle > 0 AND c.replacement_conflict_cycle IS DISTINCT FROM c.approval_cycle
+              AND EXISTS (SELECT 1 FROM supplier_shortage_claim_line l WHERE l.id IN %s AND l.claim_id = c.id)
+            RETURNING c.id
+        ''', [tuple(line_ids)])
+        changed = env['supplier.shortage.claim'].browse([row[0] for row in env.cr.fetchall()])
+        changed.invalidate_recordset(['replacement_conflict_cycle'], flush=False)
+        changed.modified(['replacement_conflict_cycle'])
     env['supplier.shortage.claim'].flush_model(['approval_status'])
     env.cr.execute('''WITH changed AS (
         UPDATE supplier_shortage_claim c SET approval_status='stale'
@@ -222,10 +234,13 @@ class SourceAccountLine(models.Model):
 
 class SourceBill(models.Model):
     _inherit='account.move'
-    def write(self,vals):
-        result=super().write(vals)
+
+    def write(self, vals):
+        before = self.reversed_entry_id.invoice_line_ids.purchase_line_id.ids if 'reversed_entry_id' in vals else []
+        result = super().write(vals)
         if vals.keys() & {'state','partner_id','currency_id','move_type','ref','invoice_date','date','reversed_entry_id'}:
-            invalidate_po_lines(self.env,self.invoice_line_ids.purchase_line_id.ids,'billing')
+            affected = (self | self.reversed_entry_id).invoice_line_ids.purchase_line_id
+            invalidate_po_lines(self.env, before + affected.ids, 'billing')
         return result
 
 
