@@ -68,6 +68,18 @@ class TestCashSettlement(CreditSettlementCase):
         self.assertEqual(claim.claim_line_ids.settlement_unresolved_value,50)
         self.assertEqual(first.move_id.line_ids.read(['balance','amount_currency']),native)
         self.assertEqual(self.env['account.move'].search_count([]),documents)
+        correction=second.move_id._reverse_moves([{'date':second.date}])
+        correction.action_post()
+        self.assertEqual(b.effective_value,0)
+        self.assertEqual(claim.claim_line_ids.settlement_unresolved_value,80)
+        b.reason='The posted accounting reversal withdrew the verified independent supplier refund.'
+        b.action_reverse()
+        self.assertEqual(b.reversal_ids,correction)
+        self.assertEqual(b.claim_value,30)
+        unrelated=self._claim(self._order(10,warehouse=self.other_wh),user=self.multi)
+        foreign_bank=self._bank(unrelated,10,self.accounts[self.other.id]['expense'])
+        with self.assertRaises((AccessError,ValidationError)),self.env.cr.savepoint():
+            self._cash(claim,foreign_bank._seek_for_lines()[2],10,bank=foreign_bank,evidence_id=evidence.id)
 
     def test_bank_and_payable_realization_are_not_additional_recovery(self):
         claim,_=self._approved()

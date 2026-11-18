@@ -1403,3 +1403,54 @@ module folder.
 & ../../.venv/Scripts/python.exe .testing/run.py --mode update --level regression --http-port 8177 --database ssc_claim_test_20_step04_fresh_20261102 --tags '/supplier_shortage_claim_reconciliation:TestClaimApproval,/supplier_shortage_claim_reconciliation:TestVendorBillIntegration,/supplier_shortage_claim_reconciliation:TestReplacementSettlement,/supplier_shortage_claim_reconciliation:TestSupplierResponse,/supplier_shortage_claim_reconciliation:TestClaimValuation,/supplier_shortage_claim_reconciliation:TestSecurity,/supplier_shortage_claim_reconciliation:TestClaimPreparation,/supplier_shortage_claim_reconciliation:TestClaimHardening'
 & ../../.venv/Scripts/python.exe .testing/check_step16_concurrency.py
 ```
+
+## STEP 17 — Cash and payable recovery
+
+Open **Supplier Recovery → Settlements → Cash and Payable Recovery** to match
+existing Odoo accounting or bank records. Open **Financial Recovery Ledger** to
+inspect goods, credit, and cash allocations in one read-only view. Each entry
+links to its original allocation. The claim's **Financial Settlements** tab
+uses the same effective amounts and shows realization separately.
+
+The maker selects the claim line, supplier accounting item, settlement kind,
+and any native bank, payment, credit, and evidence links. An independent
+Accounts reviewer verifies the source and a separate Finance manager approves
+the allocation. Supplier promises, draft payments, suspense items, and
+unmatched bank information remain outside effective recovery.
+
+A direct independent refund requires an inbound posted bank statement with a
+resolved non-payable counterpart and verified supplier evidence of the
+claim-specific untaxed amount. Gross cash uses native statement and accounting
+line limits. Claim recovery uses the evidenced untaxed amount and documented
+rates on the bank date. Direct cash shares the approved claim limit with goods
+and credits. A bank source can be split across claims within its actual balance.
+
+A credit-linked refund uses the native payable reconciliation against the
+existing allocated credit. A supplier payment additionally needs a confirmed
+native liquidity match to the chosen bank statement. An offset uses the
+native payable match to a posted vendor bill. These rows consume the credit's
+gross realization capacity and show the corresponding share of its approved
+untaxed claim value in the realization column. They add zero independent claim
+resolution. Source and credit realization capacities are validated transactionally.
+
+Posted source reversals, removed native reconciliations, and amendments to
+the FX rate used for a direct refund can suspend affected allocations. A
+Finance reversal preserves previous amounts, proof references, reviewers,
+dates and reason in the audit. Recovery actions leave native accounting
+documents and reconciliation relationships under Odoo Accounting control.
+
+Unknown or ambiguous transactions stay in review. Direct refunds require
+a separate non-payable bank counterpart. Credit-linked payment matching
+currently needs a single fully traced bank leg and a unique payable match in
+a common source currency. Mixed statement counterparts, ambiguous reconciliation
+graphs, and receipts without bank proof do not become bank-confirmed.
+For existing credits, the Step 16 source status remains informational until
+a scoped realization is verified here.
+
+Run local verification on the existing disposable databases.
+
+```powershell
+& ../../.venv/Scripts/python.exe .testing/run.py --mode update --level targeted --http-port 8176 --tags '/supplier_shortage_claim_reconciliation:TestCashSettlement'
+& ../../.venv/Scripts/python.exe .testing/check_step17_concurrency.py
+& ../../.venv/Scripts/python.exe .testing/check_step17_upgrade.py
+```
