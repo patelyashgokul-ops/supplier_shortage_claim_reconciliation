@@ -726,6 +726,35 @@ class CreditMatching(models.TransientModel):
     evidence_id=fields.Many2one('supplier.shortage.claim.evidence')
     note=fields.Text(required=True)
 
+    available_source=fields.Monetary(compute='_source_preview',currency_field='source_currency_id')
+    source_tax_total=fields.Monetary(compute='_source_preview',currency_field='source_currency_id')
+    conversion_date=fields.Date(related='credit_line_id.move_id.date',compute_sudo=False)
+
+    @api.depends('claim_line_id','credit_line_id','credit_line_id.move_id.state','credit_line_id.price_subtotal')
+    @api.depends_context('uid','allowed_company_ids')
+    def _source_preview(self):
+        model=self.env[MODEL]
+        for wizard in self:
+            wizard.available_source=wizard.source_tax_total=0
+            try:
+                line,source=wizard.claim_line_id,wizard.credit_line_id
+                line.check_access('read')
+                source.check_access('read')
+                move=source.move_id
+                move.check_access('read')
+                if (not line or not source or move.move_type!='in_refund'
+                        or move.company_id!=line.company_id
+                        or move.commercial_partner_id!=wizard.supplier_commercial_id
+                        or source.display_type!='product'
+                        or (source.purchase_line_id and source.purchase_line_id!=line.purchase_line_id)
+                        or (source.product_id and source.product_id!=line.product_id)):
+                    continue
+                projection=model.new({'claim_line_id':line.id,'credit_line_id':source.id})
+                wizard.available_source=projection.available_source
+                wizard.source_tax_total=source.price_total-source.price_subtotal
+            except AccessError:
+                continue
+
     def action_propose(self):
         self.ensure_one()
         self.check_access('read')

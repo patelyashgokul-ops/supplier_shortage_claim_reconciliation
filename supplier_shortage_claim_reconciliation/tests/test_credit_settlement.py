@@ -208,6 +208,7 @@ class TestCreditSettlement(SupplierSubmissionCase):
             'purpose':'shortage','source_amount':50,'evidence_id':evidence.id,
             'note':'Supplier attributed the posted credit to this exact line of the submitted shortage.',
         })
+        self.assertEqual(wizard.available_source,50)
         action=wizard.action_propose()
         row=self.env[CREDIT].with_user(self.maker).browse(action['res_id'])
         self.assertEqual(row.state,'draft')
@@ -238,3 +239,28 @@ class TestCreditSettlement(SupplierSubmissionCase):
         self.assertEqual(row.source_status,'review')
         self.assertEqual(row.effective_value,0)
         self.assertIn(move_line_id,[event.valuation_basis.get('credit_line') for event in row.audit_ids])
+
+    def test_credit_document_caps_positive_line_after_negative_adjustment(self):
+        claim,_=self._approved()
+        credit=self._credit(claim,8,False)
+        positive=credit.invoice_line_ids
+        credit.write({'invoice_line_ids':[Command.create({
+            'name':'Separate offset on the same source credit',
+            'product_id':self.second.id,'product_uom_id':self.second.uom_id.id,
+            'quantity':1,'price_unit':-30,'account_id':self.accounts[self.company.id]['expense'].id,
+            'tax_ids':[Command.clear()],
+        })]})
+        credit.action_post()
+        self.assertEqual(positive.price_subtotal,80)
+        self.assertEqual(credit.amount_untaxed,50)
+        maker=self.env[CREDIT].with_user(self.maker)
+        common={'claim_line_id':claim.claim_line_ids.id,'credit_line_id':positive.id,'purpose':'shortage',
+                'note':'The positive source line resolves the shortage and the document has a separate offset.'}
+        too_high=self._review(maker.create(dict(common,source_amount=60)))
+        self.assertEqual(too_high.available_source,50)
+        with self.assertRaisesRegex(ValidationError,'net vendor credit document'),self.env.cr.savepoint():
+            too_high.action_verify()
+        valid=self._review(maker.create(dict(common,source_amount=50)))
+        valid.action_verify()
+        self.assertEqual(valid.available_source,0)
+        self.assertEqual(valid.effective_value,50)
