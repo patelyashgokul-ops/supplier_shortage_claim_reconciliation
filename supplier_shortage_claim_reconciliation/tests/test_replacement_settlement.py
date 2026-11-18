@@ -23,6 +23,11 @@ class TestReplacementSettlement(SupplierSubmissionCase):
             groups=M + 'group_warehouse_reviewer,purchase.group_purchase_user,stock.group_stock_manager,account.group_account_readonly',
             company_id=cls.company.id, company_ids=[Command.set(cls.company.ids)])
 
+    def _validate(self, picking, quantity=None):
+        if quantity == 85:
+            quantity = getattr(self, 'initial_receipt_qty', 85)
+        return super()._validate(picking, quantity)
+
     def _promised(self, promised_quantity=12, **approval):
         claim, _, sub, _ = self._queued(**approval)
         self.assertEqual(self._send_mocked(sub), 1)
@@ -57,6 +62,7 @@ class TestReplacementSettlement(SupplierSubmissionCase):
         row.with_user(self.physical_reviewer).action_warehouse_verify()
 
     def test_partial_receipts_and_frozen_currency_value(self):
+        self.initial_receipt_qty = 80
         claim, promise = self._promised()
         self.assertEqual(claim.verified_recovery_amount, 0)
         approved = claim.verified_amount
@@ -83,8 +89,8 @@ class TestReplacementSettlement(SupplierSubmissionCase):
         self.assertEqual(second.promised_qty, 12)
         self.assertEqual(second.remaining_promise_qty, 5)
         self.assertEqual(claim.claim_line_ids.replacement_qty, 7)
-        self.assertEqual(claim.claim_line_ids.replacement_remaining_qty, 8)
-        self.assertEqual(claim.verified_recovery_amount, stock.currency_id.round(approved * 7 / 15))
+        self.assertEqual(claim.claim_line_ids.replacement_remaining_qty, 13)
+        self.assertEqual(claim.verified_recovery_amount, stock.currency_id.round(approved * 7 / 20))
         self.assertEqual(claim.verified_amount, approved)
         self.assertEqual((move_a.quantity, move_b.quantity), before_moves)
         self.assertEqual(self.env['account.move'].search_count([]), documents)
