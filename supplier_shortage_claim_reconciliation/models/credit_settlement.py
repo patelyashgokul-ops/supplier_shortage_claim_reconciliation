@@ -37,9 +37,13 @@ def notify_credit_source(env, moves):
     if not env.registry.ready or not moves:
         return
     roots = (moves | moves.reversed_entry_id).filtered(lambda m:m.move_type=='in_refund')
-    if not roots:
+    _mark_credit_roots(env,roots.ids)
+
+
+def _mark_credit_roots(env, ids):
+    if not ids:
         return
-    version_credit(env, roots.ids)
+    version_credit(env, ids)
     env[MODEL].flush_model(['state','source_dirty','credit_move_id'])
     env.cr.execute("""
         WITH updated AS (
@@ -53,7 +57,7 @@ def notify_credit_source(env, moves):
                'Credit source requires revalidation',json_build_object('fingerprint',source_fingerprint)
         FROM updated
     """, [tuple(roots.ids),env.uid])
-    env[MODEL].invalidate_model(['source_dirty','effective_value','source_status'],flush=False)
+    env[MODEL].invalidate_model(['source_dirty','effective_value','source_status','available_source','realization'],flush=False)
     env['supplier.shortage.claim.line'].invalidate_model(
         ['credit_value','settlement_unresolved_value','settlement_review'],flush=False)
     env['supplier.shortage.claim'].invalidate_model(['verified_recovery_amount','audit_event_ids'],flush=False)
@@ -69,12 +73,13 @@ class CreditAllocation(models.Model):
     claim_id = fields.Many2one(related='claim_line_id.claim_id',store=True,index=True)
     company_id = fields.Many2one(related='claim_line_id.company_id',store=True,index=True)
     supplier_id = fields.Many2one(related='claim_id.partner_id')
-    credit_line_id = fields.Many2one('account.move.line',required=True,check_company=True,ondelete='restrict',index=True)
+    credit_line_id = fields.Many2one('account.move.line',check_company=True,ondelete='set null',index=True)
     credit_move_id = fields.Many2one(related='credit_line_id.move_id',store=True,index=True,compute_sudo=False)
     source_date = fields.Date(related='credit_move_id.date',compute_sudo=False)
     source_currency_id = fields.Many2one(related='credit_line_id.currency_id',compute_sudo=False)
     currency_id = fields.Many2one('res.currency',readonly=True,copy=False)
-    company_currency_id = fields.Many2one(related='company_id.currency_id')
+    company_currency_id = fields.Many2one('res.currency',readonly=True,copy=False)
+    source_snapshot_currency_id = fields.Many2one('res.currency',readonly=True,copy=False)
     original_bill_id = fields.Many2one('account.move',readonly=True,ondelete='restrict',copy=False)
     approval_id = fields.Many2one('supplier.shortage.approval.cycle',readonly=True,ondelete='restrict',copy=False)
     evidence_id = fields.Many2one('supplier.shortage.claim.evidence',check_company=True,ondelete='restrict')
@@ -106,7 +111,7 @@ class CreditAllocation(models.Model):
     verified_at = fields.Datetime(readonly=True,copy=False)
     reversed_at = fields.Datetime(readonly=True,copy=False)
     reversal_ids = fields.Many2many('account.move',readonly=True,copy=False)
-    active_credit_line_id = fields.Many2one('account.move.line',readonly=True,ondelete='restrict',copy=False)
+    active_credit_line_id = fields.Many2one('account.move.line',readonly=True,ondelete='set null',copy=False)
     audit_ids = fields.One2many('supplier.shortage.claim.audit','credit_allocation_id',readonly=True,copy=False)
 
     _unique_source_claim = models.Constraint('UNIQUE(claim_line_id,active_credit_line_id)',
@@ -117,9 +122,10 @@ class CreditAllocation(models.Model):
 
     def _access_domain(self, operation):
         domain = super()._access_domain(operation)
-        for name in ('claim_line_id','credit_line_id','credit_move_id'):
-            domain &= Domain(name,'access','read')
-        for name in ('original_bill_id','evidence_id'):
+        domain &= Domain('claim_line_id','access','read')
+        if not self.env['account.move.line'].has_access('read') or not self.env['account.move'].has_access('read'):
+            return Domain.FALSE
+        for name in ('credit_line_id','credit_move_id','original_bill_id','evidence_id'):
             domain &= Domain(name,'=',False) | Domain(name,'access','read')
         return domain & ~Domain('reversal_ids','any!',~Domain('id','access','read'))
 
@@ -166,6 +172,8 @@ class CreditAllocation(models.Model):
         self.ensure_one()
         self.check_access('read')
         line, credit, move = self.claim_line_id,self.credit_line_id,self.credit_move_id
+        if not credit or not move:
+            raise ValidationError('Select an existing vendor credit line.')
         (move | move.reversed_entry_id).check_access('read')
         credit.check_access('read')
         if (move.move_type!='in_refund' or move.company_id!=line.company_id or credit.display_type!='product'
@@ -183,6 +191,8 @@ class CreditAllocation(models.Model):
 
     def _source(self):
         move,line=self.credit_move_id,self.credit_line_id
+        if not move or not line:
+            return 'review',0,self.env['account.move'],False
         move.check_access('read')
         line.check_access('read')
         if move.state!='posted':
@@ -206,13 +216,16 @@ class CreditAllocation(models.Model):
                 return item.product_id==line.product_id and item.purchase_line_id==line.purchase_line_id
             peers=move.invoice_line_ids.filtered(lambda item:item.display_type=='product' and matches(item))
             exact=products.filtered(matches)
-            if len(peers)!=1 or len(exact)>1 or (not exact and any(item.product_id==line.product_id for item in products)):
+            originals=move.invoice_line_ids.filtered(lambda item:item.display_type=='product')
+            if len(peers)!=1 or len(exact)>1 or not products or any(len(originals.filtered(
+                    lambda item:item.product_id==correction.product_id and item.purchase_line_id==correction.purchase_line_id
+                    ))!=1 for correction in products):
                 return 'review',0,reversals,False
             if exact:
                 if exact.price_subtotal<0 or not math.isfinite(exact.price_subtotal):
                     return 'review',0,reversals,False
                 offset+=exact.price_subtotal
-            signatures.append((reversal.id,exact.id,exact.price_subtotal or 0))
+            signatures.append((reversal.id,exact.id,exact.price_subtotal or 0,exact.price_total or 0))
         if not math.isfinite(amount) or currency.compare_amounts(amount,0)<=0:
             return 'review',0,reversals,False
         net=currency.round(max(amount-offset,0))
@@ -248,6 +261,9 @@ class CreditAllocation(models.Model):
         if (original.move_id.state!='posted' or original.move_id.move_type!='in_invoice'
                 or original.purchase_line_id!=line.purchase_line_id or original.currency_id!=cycle.currency_id
                 or original.quantity!=row['invoice_quantity'] or original.price_subtotal!=row['invoice_untaxed_subtotal']
+                or original.product_id!=line.product_id or original.price_unit!=row['price_unit']
+                or original.discount!=row['discount'] or set(original.tax_ids.ids)!=set(row['tax_ids'])
+                or original.product_uom_id.id!=row['bill_uom_id'] or original.product_uom_id.factor!=row['bill_uom_factor']
                 or original.move_id.commercial_partner_id!=self.supplier_id.commercial_partner_id
                 or approved_uom!=line.purchase_line_id.uom_id or approved_uom.factor!=row['uom_factor']
                 or approved_uom.compare(row['quantity'],line.allocated_qty)):
@@ -302,6 +318,11 @@ class CreditAllocation(models.Model):
         if (not math.isfinite(tax) or tax < -1e-9 or credit.amount_currency>=0
                 or currency.compare_amounts(abs(credit.amount_currency),credit.price_subtotal)):
             raise ValidationError('The native posted tax and untaxed amounts require reconciliation.')
+        correction_lines=reversals.invoice_line_ids.filtered(lambda item: item.display_type=='product'
+            and item.product_id==credit.product_id and item.purchase_line_id==credit.purchase_line_id)
+        tax-=sum(row.price_total-row.price_subtotal for row in correction_lines)
+        if not math.isfinite(tax) or currency.compare_amounts(tax,0)<0:
+            raise ValidationError('The corrected credit tax basis requires reconciliation.')
         fx=self._fx(cycle.currency_id)
         amount=currency._convert(self.source_amount,cycle.currency_id,self.company_id,self.credit_move_id.date)
         uom=self.env['uom.uom'].browse(basis['uom_id'])
@@ -336,6 +357,8 @@ class CreditAllocation(models.Model):
     def _transition(self,values,message):
         old=self.state
         super().write(values)
+        if values.get('state') in ('verified','reversed'):
+            self.invalidate_model(['available_source'],flush=False)
         self._audit(message,old)
 
     def action_submit(self):
@@ -356,7 +379,9 @@ class CreditAllocation(models.Model):
         cycle,_,bill,_,_,fp,fx,_,_,_=self._valuation()
         self._transition({'state':'finance','source_dirty':False,'source_fingerprint':fp,
             'accounts_by':self.env.uid,'approval_id':cycle.id,'original_bill_id':bill.id,
-            'currency_id':cycle.currency_id.id,'fx_basis':fx,'conversion_date':self.credit_move_id.date},
+            'currency_id':cycle.currency_id.id,'fx_basis':fx,'conversion_date':self.credit_move_id.date,
+            'source_snapshot_currency_id':self.source_currency_id.id,
+            'company_currency_id':self.company_id.currency_id.id},
             'Accounts verified purpose, posted source, tax and FX basis')
 
     def action_verify(self):
@@ -366,12 +391,14 @@ class CreditAllocation(models.Model):
         if self.state!='finance' or self.env.user in (self.create_uid | self.accounts_by):
             raise AccessError('A separate Finance reviewer must authorize credit recovery.')
         cycle,basis,_,net,reversals,fp,fx,amount,qty,tax=self._valuation()
-        if self.source_dirty or fp!=self.source_fingerprint or fx!=self.fx_basis or cycle!=self.approval_id:
+        if (self.source_dirty or fp!=self.source_fingerprint or fx!=self.fx_basis or cycle!=self.approval_id or self.company_currency_id!=self.company_id.currency_id
+                or self.source_snapshot_currency_id!=self.source_currency_id):
             raise ValidationError('Source, FX or approval changed. Request a new Accounts review.')
-        self.flush_model(['state','source_amount','source_tax','company_value','source_quantity','credit_line_id','claim_line_id'])
+        self.flush_model(['state','source_dirty','source_amount','source_tax','company_value','source_quantity',
+                          'credit_line_id','claim_line_id'])
         self.env.cr.execute("""
             SELECT coalesce(sum(source_amount),0),coalesce(sum(source_tax),0),coalesce(sum(company_value),0),
-                   coalesce(sum(source_quantity),0),coalesce(bool_or(claim_line_id=%s),false)
+                   coalesce(sum(source_quantity),0),coalesce(bool_or(claim_line_id=%s OR source_dirty),false)
             FROM supplier_shortage_credit_allocation WHERE credit_line_id=%s AND state='verified'
         """,[self.claim_line_id.id,self.credit_line_id.id])
         used,tax_used,company_used,qty_used,duplicate=self.env.cr.fetchone()
@@ -394,7 +421,7 @@ class CreditAllocation(models.Model):
             raise ValidationError('Combined goods and credit exceed the approved claim capacity.')
         subtotal=self.credit_line_id.price_subtotal
         company=self.company_currency_id
-        allocated_tax=currency.round(currency.round(tax*(used+self.source_amount)/subtotal)-tax_used)
+        allocated_tax=currency.round(currency.round(tax*(used+self.source_amount)/net)-tax_used)
         company_value=company.round(company.round(abs(self.credit_line_id.balance)*(used+self.source_amount)/subtotal)-company_used)
         if allocated_tax<0 or company_value<0:
             raise ValidationError('Prior rounding allocations require reconciliation.')
@@ -526,7 +553,8 @@ class CreditAllocation(models.Model):
             'change_summary':message,'reason':self.reason or self.note,'valuation_basis':{
                 'previous_state':old,'state':self.state,'line':self.claim_line_id.id,'credit':self.credit_move_id.id,
                 'credit_line':self.credit_line_id.id,'bill':self.original_bill_id.id,'purpose':self.purpose,
-                'source_currency':self.source_currency_id.id,'source_amount':self.source_amount,'tax':self.source_tax,
+                'source_currency':(self.source_snapshot_currency_id or self.source_currency_id).id,
+                'company_currency':self.company_currency_id.id,'source_amount':self.source_amount,'tax':self.source_tax,
                 'claim_value':self.claim_value,'claim_currency':self.currency_id.id,'quantity':self.claim_quantity,
                 'company_value':self.company_value,'fx':self.fx_basis,'fingerprint':self.source_fingerprint,
                 'reversals':self.reversal_ids.ids},
@@ -668,3 +696,30 @@ class CreditMatching(models.TransientModel):
             'evidence_id':self.evidence_id.id,'note':self.note,
         })
         return {'type':'ir.actions.act_window','res_model':MODEL,'res_id':row.id,'views':[(False,'form')]}
+
+class CreditCurrencyRate(models.Model):
+    _inherit='res.currency.rate'
+
+    def _flag_credit_rate_change(self):
+        if not self.env.registry.ready or not self:
+            return
+        self.env[MODEL].flush_model(['fx_basis','state','credit_move_id'])
+        self.env.cr.execute("""
+            SELECT DISTINCT credit_move_id FROM supplier_shortage_credit_allocation allocation
+            WHERE allocation.state IN ('finance','verified') AND EXISTS (
+                SELECT 1 FROM unnest(%s::integer[]) rate(id)
+                WHERE allocation.fx_basis @> jsonb_build_object('rates',jsonb_build_array(jsonb_build_object('id',rate.id)))
+            )
+        """,[self.ids])
+        # Only source identities are propagated, even for a rate editor without
+        # access to the underlying accounting records.
+        _mark_credit_roots(self.env,[row[0] for row in self.env.cr.fetchall() if row[0]])
+
+    def write(self, values):
+        if values.keys() & {'rate','company_rate','inverse_company_rate','currency_id','company_id','name'}:
+            self._flag_credit_rate_change()
+        return super().write(values)
+
+    def unlink(self):
+        self._flag_credit_rate_change()
+        return super().unlink()

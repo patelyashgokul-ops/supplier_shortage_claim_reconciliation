@@ -283,6 +283,9 @@ class SourceAccountLine(models.Model):
         result=super().unlink()
         invalidate_po_lines(self.env,regular_ids,'billing')
         invalidate_po_lines(self.env,credit_ids,'credit')
+        if self.env.registry.ready and credit_rows:
+            self.env['supplier.shortage.credit.allocation'].invalidate_model(
+                ['credit_line_id','active_credit_line_id','available_source'],flush=False)
         return result
 
 
