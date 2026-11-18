@@ -263,3 +263,61 @@ class TestReplacementSettlement(SupplierSubmissionCase):
         self.assertEqual(allocation.effective_qty, 0)
         with self.assertRaises(ValidationError), self.env.cr.savepoint():
             allocation.with_user(self.physical_reviewer).action_warehouse_verify()
+
+
+    def test_returned_serial_cannot_be_reused_until_prior_recovery_is_reversed(self):
+        claim, promise = self._promised()
+        line = claim.claim_line_ids
+        self.second.store_by = 'serial'
+        serial = self.env['stock.lot'].create({
+            'name': 'SSC-REPLACEMENT-SERIAL', 'product_id': self.second.id, 'company_id': self.company.id,
+        })
+        evidence = self.env['supplier.shortage.claim.evidence'].with_user(self.maker).create({
+            'claim_id': claim.id, 'supplier_response_submission_id': promise.submission_id.id,
+            'scope_line_ids': [Command.set(line.ids)], 'evidence_type': 'supplier_confirmation',
+            'description': 'Supplier confirmed this serial as one equivalent replacement unit.',
+            'filename': 'serial.txt', 'upload_data': base64.b64encode(
+                b'The stated serial replaces one original unit, including when resent after an authorized return.'),
+            'verification_note': 'Checked supplier identity, serial, exact claim revision and the substitution terms.',
+        })
+        verify_document(evidence)
+
+        def receipt_and_proposal():
+            picking = self.env['stock.picking'].create({
+                'partner_id': self.supplier.id, 'picking_type_id': self.wh.in_type_id.id,
+                'location_id': self.vendor_location.id, 'location_dest_id': self.wh.lot_stock_id.id,
+                'move_ids': [Command.create({'product_id': self.second.id, 'product_uom_qty': 1,
+                    'uom_id': self.second.uom_id.id, 'location_id': self.vendor_location.id,
+                    'location_dest_id': self.wh.lot_stock_id.id})],
+            })
+            picking.action_confirm()
+            picking.action_assign()
+            move = picking.move_ids
+            move.quantity = 1
+            move.move_line_ids.lot_id = serial
+            self._validate(picking)
+            row = self.env['supplier.shortage.replacement'].with_user(self.maker).create({
+                'claim_line_id': line.id, 'stock_move_id': move.id, 'stock_move_line_id': move.move_line_ids.id,
+                'source_qty': 1, 'substitute_claim_qty': 1, 'evidence_id': evidence.id,
+                'note': 'Supplier independently confirmed this verified serial against the submitted shortage.',
+            })
+            self._review(row)
+            return row.with_user(self.finance)
+
+        first = receipt_and_proposal()
+        first.action_verify()
+        returned = first.picking_id._create_return()
+        returned.action_assign()
+        returned.move_ids.quantity = 1
+        returned.move_ids.move_line_ids.lot_id = serial
+        self._validate(returned)
+        self.assertTrue(first.source_dirty)
+        second = receipt_and_proposal()
+        with self.assertRaisesRegex(ValidationError, 'serial already has'), self.env.cr.savepoint():
+            second.action_verify()
+        first.decision_reason = 'The original serial was returned and its prior recovery is being corrected.'
+        first.action_reverse()
+        second.action_verify()
+        self.assertEqual(second.effective_qty, 1)
+        self.assertEqual(first.effective_qty, 0)
+        self.assertEqual(claim.claim_line_ids.replacement_qty, 1)
