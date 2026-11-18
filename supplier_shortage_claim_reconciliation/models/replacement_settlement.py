@@ -1,4 +1,4 @@
-import hashlib
+﻿import hashlib
 import json
 import math
 
@@ -192,7 +192,7 @@ class Replacement(models.Model):
                 or not ml.uom_id._has_common_reference(move.uom_id) for ml in lines):
             raise ValidationError('Receipt lines must establish completed, company-owned supplier goods.')
         tracked = self.stock_move_line_id
-        if move.product_id.tracking != 'none':
+        if move.product_id.tracking in ('lot', 'serial'):
             if not tracked or not tracked.lot_id:
                 raise ValidationError('Select the actual completed lot or serial receipt line.')
             if move.product_id.tracking == 'serial' and move.uom_id.compare(
@@ -410,7 +410,7 @@ class Replacement(models.Model):
         if self.state == 'reversed':
             return
         if self.state != 'verified' or self.env.user == self.create_uid or len((self.decision_reason or '').strip()) < 20:
-            raise ValidationError('Reversal requires a verified allocation and an independent reviewerâ€™s documented reason.')
+            raise ValidationError('Reversal requires a verified allocation and an independent reviewerÃ¢â‚¬â„¢s documented reason.')
         self.env.cr.execute('UPDATE supplier_shortage_claim SET write_date = write_date WHERE id = %s', [self.claim_id.id])
         self._transition({'state': 'reversed', 'active_move_id': False, 'reversed_at': fields.Datetime.now()},
                          'Recovery reversed')
@@ -582,3 +582,4 @@ class ReplacementClaimLine(models.Model):
             line.replacement_remaining_qty = max(0, line.replacement_approved_qty - line.replacement_qty)
             line.replacement_value = sum(same_currency.mapped('effective_value'))
             line.replacement_unresolved_value = max(0, row.get('amount', 0) - line.replacement_value)
+
