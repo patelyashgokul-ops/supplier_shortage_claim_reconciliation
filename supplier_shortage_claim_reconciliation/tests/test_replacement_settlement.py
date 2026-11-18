@@ -163,6 +163,7 @@ class TestReplacementSettlement(SupplierSubmissionCase):
     def test_pending_manual_receipt_and_exceptional_substitute(self):
         claim, promise = self._promised()
         line = claim.claim_line_ids
+        self.second.store_by = 'lot'
         picking = self.env['stock.picking'].create({
             'partner_id': self.supplier.id, 'picking_type_id': self.wh.in_type_id.id,
             'location_id': self.vendor_location.id, 'location_dest_id': self.wh.lot_stock_id.id,
@@ -172,6 +173,12 @@ class TestReplacementSettlement(SupplierSubmissionCase):
         })
         picking.action_confirm()
         source = picking.move_ids
+        picking.action_assign()
+        source.quantity = 4
+        lot = self.env['stock.lot'].create({
+            'name': 'SSC-REPLACEMENT-LOT', 'product_id': self.second.id, 'company_id': self.company.id,
+        })
+        source.move_line_ids.lot_id = lot
         evidence = self.env['supplier.shortage.claim.evidence'].with_user(self.maker).create({
             'claim_id': claim.id, 'supplier_response_submission_id': promise.submission_id.id,
             'scope_line_ids': [Command.set(line.ids)], 'evidence_type': 'supplier_confirmation',
@@ -183,6 +190,7 @@ class TestReplacementSettlement(SupplierSubmissionCase):
         verify_document(evidence)
         row = self.env['supplier.shortage.replacement'].with_user(self.maker).create({
             'claim_line_id': line.id, 'stock_move_id': source.id, 'source_qty': 4,
+            'stock_move_line_id': source.move_line_ids.id,
             'substitute_claim_qty': 3, 'evidence_id': evidence.id,
             'note': 'Verified supplier agreement equates four substitute units to three original units.',
         })
@@ -195,6 +203,7 @@ class TestReplacementSettlement(SupplierSubmissionCase):
         row.with_user(self.warehouse).action_warehouse_verify()
         unproven = self.env['supplier.shortage.replacement'].with_user(self.maker).create({
             'claim_line_id': line.id, 'stock_move_id': source.id, 'source_qty': 4,
+            'stock_move_line_id': source.move_line_ids.id,
             'substitute_claim_qty': 4, 'note': 'The stock item exists but the terms are awaiting supplier evidence.',
         })
         self._review(unproven)
@@ -206,6 +215,7 @@ class TestReplacementSettlement(SupplierSubmissionCase):
         self.assertEqual(row.effective_value, claim.currency_id.round(claim.verified_amount * 3 / 15))
         self.assertEqual(row.source_received_qty, 4)
         self.assertFalse(source.purchase_line_id)
+        self.assertEqual(row.stock_move_line_id.lot_id, lot)
         self.env['purchase.order.line'].browse(line.purchase_line_id.id).price_unit += 1
         self.assertTrue(row.source_dirty)
         self.assertEqual(row.effective_qty, 0)
@@ -229,3 +239,27 @@ class TestReplacementSettlement(SupplierSubmissionCase):
         self._review(valid)
         valid.with_user(self.finance).action_verify()
         self.assertEqual(allocated.effective_qty + valid.effective_qty, 10)
+
+
+    def test_canceled_pending_receipt_releases_provisional_tracking_reference(self):
+        order = self._order(10)
+        claim = self._claim(order)
+        picking = self._incoming(order)
+        picking.action_assign()
+        move = picking.move_ids
+        move.quantity = 2
+        line = move.move_line_ids[:1]
+        self.assertTrue(line)
+        allocation = self.env['supplier.shortage.replacement'].with_user(self.maker).create({
+            'claim_line_id': claim.claim_line_ids.id, 'stock_move_id': move.id, 'stock_move_line_id': line.id,
+            'source_qty': 2, 'note': 'Pending native operation awaiting receipt and claim verification.',
+        })
+        allocation.action_request_verification()
+        self.assertEqual(allocation.state, 'receipt')
+        picking.action_cancel()
+        self.assertEqual(move.state, 'cancel')
+        allocation.invalidate_recordset(['stock_move_line_id'])
+        self.assertFalse(allocation.stock_move_line_id)
+        self.assertEqual(allocation.effective_qty, 0)
+        with self.assertRaises(ValidationError), self.env.cr.savepoint():
+            allocation.with_user(self.physical_reviewer).action_warehouse_verify()
