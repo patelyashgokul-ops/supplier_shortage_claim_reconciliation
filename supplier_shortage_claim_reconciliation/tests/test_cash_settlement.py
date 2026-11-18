@@ -308,3 +308,24 @@ class TestCashSettlement(CreditSettlementCase):
         self.assertEqual(sum(rows.mapped('realized_value')),60)
         self.assertEqual(claim.claim_line_ids.remaining_realization,40)
         self.assertEqual(claim.verified_recovery_amount,100)
+
+    def test_credit_realization_uses_native_cross_currency_amounts(self):
+        claim,_=self._approved()
+        source=self.env['res.currency'].create({'name':'XCR','symbol':'XC','rounding':0.01})
+        self.env['res.currency.rate'].create({'currency_id':source.id,'company_id':claim.company_id.root_id.id,
+                                             'name':claim.claim_date,'rate':2})
+        document=self._credit(claim,10,currency=source)
+        credit=self._review(self._proposal(claim,document,100))
+        credit.action_verify()
+        payable=self.accounts[claim.company_id.id]['payable']
+        bank=self._bank(claim,25,payable)
+        line=bank._seek_for_lines()[2]
+        (line | document.line_ids.filtered(lambda item:item.account_id==payable)).reconcile()
+        row=self._review(self._cash(claim,line,25,kind='credit',bank=bank,credit_id=credit.id))
+        row.action_verify()
+        match=line.matched_debit_ids
+        self.assertEqual(row.fx_basis['attributed_credit_amount'],match.debit_amount_currency)
+        self.assertEqual(row.fx_basis['native_realization']['payment_amount'],match.credit_amount_currency)
+        self.assertEqual(row.realized_value,25)
+        self.assertEqual(claim.verified_recovery_amount,50)
+        self.assertEqual(claim.claim_line_ids.remaining_realization,25)

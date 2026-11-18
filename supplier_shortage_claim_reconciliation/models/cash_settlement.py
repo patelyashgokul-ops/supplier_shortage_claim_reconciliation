@@ -290,8 +290,8 @@ class CashSettlement(models.Model):
             if self.untaxed_amount<=0:
                 raise ValidationError('Enter the documented untaxed claim amount.')
         else:
-            if self.untaxed_amount or not credit or not credit.effective_value or credit.source_snapshot_currency_id!=currency:
-                raise ValidationError('Realization requires an effective credit allocation in the source currency.')
+            if self.untaxed_amount or not credit or not credit.effective_value:
+                raise ValidationError('Realization requires an effective credit allocation.')
             if line.account_id.account_type!='liability_payable':
                 raise ValidationError('Credit realization must use the reconciled supplier payable item.')
             matches=line.matched_debit_ids
@@ -302,9 +302,11 @@ class CashSettlement(models.Model):
                 partial &= self.reconcile_match_id
             if (len(partial)!=1 or partial.debit_move_id.account_id!=line.account_id
                     or partial.debit_move_id.partner_id.commercial_partner_id!=partner
-                    or partial.debit_move_id.currency_id!=currency):
+                    or partial.debit_move_id.currency_id!=credit.source_snapshot_currency_id
+                    or partial.credit_move_id.currency_id!=currency
+                    or partial.debit_amount_currency<=0 or partial.credit_amount_currency<=0):
                 raise ValidationError('A unique native payable match to this credit is required.')
-            cap=min(cap,partial.credit_amount_currency,partial.debit_amount_currency)
+            cap=min(cap,partial.credit_amount_currency)
         if bank:
             cap=min(cap,bank_amount)
         if (currency.compare_amounts(cap,0)<=0 or currency.compare_amounts(self.gross_amount,cap)>0
@@ -330,7 +332,12 @@ class CashSettlement(models.Model):
             if cycle.currency_id.is_zero(claim_value):
                 raise ValidationError('The normalized claim value rounds to zero.')
         else:
-            fx=self.credit_id.fx_basis
+            fx=dict(self.credit_id.fx_basis or {},native_realization={
+                'partial_id':partial.id,'payment_currency_id':source.id,
+                'credit_currency_id':partial.debit_move_id.currency_id.id,
+                'payment_amount':partial.credit_amount_currency,'credit_amount':partial.debit_amount_currency,
+                'company_amount':partial.amount,
+            })
             claim_value=0
         return cycle,basis,fingerprint,partial,cap,bank_amount,fx,claim_value
 
@@ -383,22 +390,25 @@ class CashSettlement(models.Model):
                 or self.frozen_source_currency_id!=self.source_currency_id
                 or self.company_currency_id!=self.company_id.currency_id):
             raise ValidationError('The source or approval changed. Request an Accounts recheck.')
-        self.flush_model(['state','gross_amount','realized_snapshot','source_line_id','bank_id','credit_id','partial_id',
+        self.flush_model(['state','gross_amount','realized_snapshot','source_line_id','bank_id','credit_id','partial_id','fx_basis',
                           'claim_line_id','frozen_source_currency_id'])
         self.env.cr.execute("""
             SELECT coalesce(sum(gross_amount) FILTER (WHERE source_line_id=%s),0),
                    coalesce(sum(gross_amount) FILTER (WHERE bank_id=%s),0),
                    coalesce(sum(gross_amount) FILTER (WHERE partial_id=%s),0),
-                   coalesce(sum(gross_amount) FILTER (WHERE credit_id=%s),0),
+                   coalesce(sum(coalesce((fx_basis->>'attributed_credit_amount')::double precision,gross_amount))
+                       FILTER (WHERE credit_id=%s),0),
                    coalesce(sum(realized_snapshot) FILTER (WHERE credit_id=%s),0),
                    coalesce(bool_or(source_line_id=%s AND claim_line_id=%s AND credit_id IS NOT DISTINCT FROM %s
                        AND partial_id IS NOT DISTINCT FROM %s),false),
-                   coalesce(bool_or(frozen_source_currency_id!=%s),false)
+                   coalesce(bool_or(frozen_source_currency_id!=%s
+                       AND (source_line_id=%s OR bank_id=%s OR partial_id=%s)),false)
             FROM supplier_shortage_cash_settlement WHERE state='verified'
               AND (source_line_id=%s OR bank_id=%s OR credit_id=%s OR partial_id=%s)
         """,[self.source_line_id.id,self.bank_id.id or None,partial.id or None,self.credit_id.id or None,
               self.credit_id.id or None,self.source_line_id.id,self.claim_line_id.id,self.credit_id.id or None,partial.id or None,
-              self.source_currency_id.id,self.source_line_id.id,self.bank_id.id or None,self.credit_id.id or None,partial.id or None])
+              self.source_currency_id.id,self.source_line_id.id,self.bank_id.id or None,partial.id or None,
+              self.source_line_id.id,self.bank_id.id or None,self.credit_id.id or None,partial.id or None])
         line_used,bank_used,matched_used,credit_used,realized,duplicate,currency_conflict=self.env.cr.fetchone()
         source=self.source_currency_id
         gross=self.gross_amount
@@ -422,14 +432,20 @@ class CashSettlement(models.Model):
             realized_value=claim_value
         else:
             credit=self.credit_id
+            credit_currency=credit.source_snapshot_currency_id
             credit_gross=credit.source_amount+credit.source_tax
-            if source.compare_amounts(credit_used+gross,credit_gross)>0:
+            ratio=partial.debit_amount_currency/partial.credit_amount_currency
+            equivalent=credit_currency.round(
+                credit_currency.round((matched_used+gross)*ratio)-credit_currency.round(matched_used*ratio))
+            if (credit_currency.compare_amounts(equivalent,0)<=0
+                    or credit_currency.compare_amounts(credit_used+equivalent,credit_gross)>0):
                 raise ValidationError('The credit allocation has insufficient remaining realization capacity.')
-            realized_value=currency.round(currency.round(credit.claim_value*(credit_used+gross)/credit_gross)-realized)
+            realized_value=currency.round(currency.round(credit.claim_value*(credit_used+equivalent)/credit_gross)-realized)
             if realized_value<0:
                 raise ValidationError('Historical realization rounding requires review.')
+            fx=dict(fx,attributed_credit_amount=equivalent)
         self._touch_claim()
-        self._transition({'state':'verified','claim_value':claim_value,'realized_snapshot':realized_value,
+        self._transition({'state':'verified','claim_value':claim_value,'realized_snapshot':realized_value,'fx_basis':fx,
             'verified_by':self.env.uid,'verified_at':fields.Datetime.now()},'Cash or payable settlement verified')
 
     def _touch_claim(self):
@@ -775,7 +791,9 @@ class CashMatchingWizard(models.TransientModel):
               AND (source_line_id=%s OR bank_id=%s OR partial_id=%s OR credit_id=%s)
         """,list(keys.values()))
         if (self.env.cr.fetchone()[0]!=len(visible)
-                or any(row.frozen_source_currency_id!=self.source_currency_id for row in visible)):
+                or any(row.frozen_source_currency_id!=self.source_currency_id
+                       and any(keys[name] and row[name].id==keys[name] for name in
+                               ('source_line_id','bank_id','partial_id')) for row in visible)):
             return self._notice(self.env._('Source verified. Available allocation requires Accounts review.'))
         def used(name):
             return sum(row.gross_amount for row in visible if row[name].id==keys[name])
@@ -785,7 +803,10 @@ class CashMatchingWizard(models.TransientModel):
         if partial:
             limits.append(cap-used('partial_id'))
         if self.credit_id:
-            limits.append(self.credit_id.source_amount+self.credit_id.source_tax-used('credit_id'))
+            attributed=sum((row.fx_basis or {}).get('attributed_credit_amount',row.gross_amount)
+                           for row in visible if row.credit_id==self.credit_id)
+            credit_left=self.credit_id.source_amount+self.credit_id.source_tax-attributed
+            limits.append(credit_left*partial.credit_amount_currency/partial.debit_amount_currency)
         remaining=self.source_currency_id.round(min(limits))
         return self._notice(self.env._('Source verified. Remaining gross allocation capacity: %s.',remaining))
 

@@ -1447,7 +1447,9 @@ documents and reconciliation relationships under Odoo Accounting control.
 
 Unknown or ambiguous transactions stay in review. Direct refunds require
 a separate non-payable bank counterpart. Credit-linked payment matching
-requires a single fully traced bank leg and a common source currency. When
+requires a single fully traced bank leg. Where credit and payment currencies
+differ, the native reconciliation's debit and credit currency amounts establish
+the realization ratio. When
 several native payable matches exist, the preparer selects the precise
 reconciliation record. Each matched portion has its own capacity. Ambiguous counterpart splits, unidentified fees or
 exchange differences, and receipts without bank proof remain under review. The
@@ -1466,6 +1468,8 @@ Run local verification on the existing disposable databases.
 
 ```powershell
 & ../../.venv/Scripts/python.exe .testing/run.py --mode update --level targeted --http-port 8176 --tags '/supplier_shortage_claim_reconciliation:TestCashSettlement'
+$m = '/supplier_shortage_claim_reconciliation'
+& ../../.venv/Scripts/python.exe .testing/run.py --mode update --level regression --http-port 8177 --database ssc_claim_test_20_step04_fresh_20261102 --tags "${m}:TestCreditSettlement,${m}:TestOptionalCreditDebitNote,${m}:TestReplacementSettlement,${m}:TestClaimApproval,${m}:TestVendorBillIntegration,${m}:TestClaimValuation,${m}:TestSecurity,${m}:TestClaimHardening,${m}:TestSupplierResponse"
 & ../../.venv/Scripts/python.exe .testing/check_step17_concurrency.py
 & ../../.venv/Scripts/python.exe .testing/check_step17_upgrade.py
 ```
