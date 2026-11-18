@@ -1,4 +1,4 @@
-﻿<odoo>
+<odoo>
     <record id="view_replacement_search" model="ir.ui.view">
         <field name="name">supplier.shortage.replacement.search</field>
         <field name="model">supplier.shortage.replacement</field>
@@ -50,17 +50,17 @@
             <form delete="false" duplicate="false">
                 <header>
                     <button name="action_request_verification" type="object" string="Request Warehouse Review"
-                            class="oe_highlight" invisible="state not in ('draft','receipt')" groups="group_claim_user"/>
+                            class="oe_highlight" invisible="state not in ('draft','receipt')" groups="supplier_shortage_claim_reconciliation.group_claim_user"/>
                     <button name="action_warehouse_verify" type="object" string="Confirm Physical Receipt"
-                            class="oe_highlight" invisible="state not in ('review','receipt')" groups="group_warehouse_reviewer"/>
+                            class="oe_highlight" invisible="state not in ('review','receipt')" groups="supplier_shortage_claim_reconciliation.group_warehouse_reviewer"/>
                     <button name="action_verify" type="object" string="Authorize Goods Recovery"
-                            class="oe_highlight" invisible="state != 'finance' or source_dirty" groups="group_finance_manager"/>
+                            class="oe_highlight" invisible="state != 'finance' or source_dirty" groups="supplier_shortage_claim_reconciliation.group_finance_manager"/>
                     <button name="action_request_recheck" type="object" string="Request Warehouse Recheck"
-                            invisible="state != 'finance'" groups="group_finance_manager"/>
+                            invisible="state != 'finance'" groups="supplier_shortage_claim_reconciliation.group_finance_manager"/>
                     <button name="action_reject" type="object" string="Reject" invisible="state not in ('receipt','review','finance')"
-                            groups="group_finance_manager"/>
+                            groups="supplier_shortage_claim_reconciliation.group_finance_manager"/>
                     <button name="action_reverse" type="object" string="Reverse Recovery" invisible="state != 'verified'"
-                            groups="group_finance_manager"/>
+                            groups="supplier_shortage_claim_reconciliation.group_finance_manager"/>
                     <field name="state" widget="statusbar" statusbar_visible="draft,receipt,review,finance,verified"/>
                 </header>
                 <sheet>
@@ -88,6 +88,7 @@
                             <field name="product_id"/>
                             <field name="stock_move_line_id" readonly="state != 'draft'"
                                    domain="[('move_id','=',stock_move_id)]" options="{'no_create': True}"/>
+                            <field name="source_received_qty" invisible="not approval_id"/>
                             <field name="source_qty" readonly="state != 'draft'"/>
                             <field name="source_uom_id"/>
                             <field name="substitute_claim_qty" readonly="state != 'draft'"/>
@@ -118,6 +119,18 @@
                             <field name="source_dirty" invisible="True"/>
                         </group>
                     </group>
+                    <notebook>
+                        <page string="Settlement Audit" name="settlement_audit">
+                            <field name="audit_ids" readonly="True">
+                                <list create="false" delete="false">
+                                    <field name="event_datetime"/>
+                                    <field name="actor_id"/>
+                                    <field name="change_summary"/>
+                                    <field name="reason"/>
+                                </list>
+                            </field>
+                        </page>
+                    </notebook>
                 </sheet>
             </form>
         </field>
@@ -137,7 +150,7 @@
         <field name="arch" type="xml">
             <xpath expr="//notebook" position="inside">
                 <page name="replacement_settlement" string="Replacement Goods"
-                      groups="group_claim_user,group_warehouse_reviewer,group_accounts_reviewer">
+                      groups="supplier_shortage_claim_reconciliation.group_claim_user,supplier_shortage_claim_reconciliation.group_warehouse_reviewer,supplier_shortage_claim_reconciliation.group_accounts_reviewer">
                     <button name="action_open_replacements" type="object" string="Open Replacement Workbench" class="btn-secondary"/>
                     <field name="claim_line_ids" readonly="True">
                         <list create="false" delete="false">
@@ -156,7 +169,7 @@
                         <list create="false" delete="false">
                             <field name="picking_id"/>
                             <field name="stock_move_id"/>
-                            <field name="commitment_id" groups="group_claim_user,group_accounts_reviewer"/>
+                            <field name="commitment_id" groups="supplier_shortage_claim_reconciliation.group_claim_user,supplier_shortage_claim_reconciliation.group_accounts_reviewer"/>
                             <field name="warehouse_by"/>
                             <field name="effective_qty"/>
                             <field name="state" widget="badge"/>

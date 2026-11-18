@@ -69,9 +69,11 @@ class Replacement(models.Model):
     approved_value = fields.Monetary(readonly=True, aggregator=False, copy=False)
     allocated_qty = fields.Float(readonly=True, digits=0, aggregator=False, copy=False)
     verified_goods_value = fields.Monetary(readonly=True, aggregator=False, copy=False)
-    source_received_qty = fields.Float(readonly=True, digits=0, aggregator=False, copy=False)
+    source_received_qty = fields.Float(readonly=True, digits=0, aggregator=False, copy=False,
+        string='Net Receipt Quantity in Source UoM')
     source_canonical_qty = fields.Float(readonly=True, digits=0, aggregator=False, copy=False)
     active_move_id = fields.Many2one('stock.move', readonly=True, ondelete='restrict', copy=False)
+    audit_ids = fields.One2many('supplier.shortage.claim.audit', 'replacement_id', readonly=True, copy=False)
     effective_qty = fields.Float(compute='_effective', digits=0, aggregator=False)
     effective_value = fields.Monetary(compute='_effective', aggregator=False)
     remaining_promise_qty = fields.Float(compute='_promise_position', digits=0, aggregator=False)
@@ -184,6 +186,11 @@ class Replacement(models.Model):
             raise ValidationError('Warehouse review requires a validated receipt.')
         lines = move.move_line_ids
         lines.check_access('read')
+        if not lines or any(ml.state != 'done' or ml.company_id != move.company_id
+                or ml.product_id != move.product_id or ml.owner_id
+                or ml.location_id.usage != 'supplier' or ml.location_dest_id.usage != 'internal'
+                or not ml.uom_id._has_common_reference(move.uom_id) for ml in lines):
+            raise ValidationError('Receipt lines must establish completed, company-owned supplier goods.')
         tracked = self.stock_move_line_id
         if move.product_id.tracking != 'none':
             if not tracked or not tracked.lot_id:
@@ -224,7 +231,7 @@ class Replacement(models.Model):
             canonical.id, canonical.factor, move.quantity, move.purchase_line_id.id, move.picking_id.id,
             move.picking_id.partner_id.id, move.picking_type_id.id, move.picking_id.backorder_id.id,
             move.origin_returned_move_id.id, move.location_id.id, move.location_dest_id.id, str(move.date),
-            [(ml.id, ml.lot_id.id, ml.quantity, ml.uom_id.id, ml.uom_id.factor) for ml in lines.sorted('id')],
+            [(ml.id, ml.lot_id.id, ml.quantity, ml.uom_id.id, ml.uom_id.factor, ml.location_id.id, ml.location_dest_id.id) for ml in lines.sorted('id')],
             [(ret.id, ret.quantity, ret.uom_id.id, ret.uom_id.factor, str(ret.write_date)) for ret in returns.sorted('id')],
         ]).encode()).hexdigest()
         return fingerprint, net, quantity, lot_net
@@ -240,6 +247,8 @@ class Replacement(models.Model):
                 or row['quantity'] <= 0 or uom != line.purchase_line_id.uom_id
                 or uom.factor != row['uom_factor'] or uom.compare(row['quantity'], line.allocated_qty)):
             raise ValidationError('An applicable approved claim snapshot is required.')
+        if claim.purchase_source_status != 'current':
+            raise ValidationError('The approved purchase source requires reconciliation.')
         bill = self.env['account.move.line'].browse(row['bill_line_id'])
         bill.check_access('read')
         bill.move_id.check_access('read')
@@ -273,7 +282,8 @@ class Replacement(models.Model):
         substitute = move.product_id != line.product_id
         if not self.commitment_id or not move.purchase_line_id or substitute:
             evidence = self.evidence_id
-            if not evidence or evidence.effective_state != 'verified' or evidence.claim_line_id != line:
+            if (not evidence or evidence.evidence_type not in ('supplier', 'supplier_confirmation', 'supplier_response')
+                    or evidence.effective_state != 'verified' or line not in evidence._scope_lines()):
                 raise ValidationError('This match requires independently verified supplier evidence scoped to the claim line.')
         if substitute:
             qty = self.substitute_claim_qty
@@ -290,7 +300,10 @@ class Replacement(models.Model):
         self._role(role)
         self.check_access('write')
         self.stock_move_id.check_access('read')
-        _version_moves(self.env, self.stock_move_id.ids)
+        version_keys = self.stock_move_id.ids
+        if self.stock_move_id.product_id.tracking == 'serial' and self.stock_move_line_id.lot_id:
+            version_keys += [-self.stock_move_line_id.lot_id.id]
+        _version_moves(self.env, version_keys)
         lock_records(self.claim_id.purchase_id)
         lock_records(self.claim_id)
         lock_records(self.claim_line_id)
@@ -352,6 +365,14 @@ class Replacement(models.Model):
         if duplicate or source_used + canonical_qty > net + 1e-9 or (self.stock_move_line_id
                 and lot_used + canonical_qty > lot_net + 1e-9):
             raise ValidationError('The receipt has insufficient unallocated physical quantity for this match.')
+        if self.stock_move_id.product_id.tracking == 'serial':
+            self.env.cr.execute('''
+                SELECT 1 FROM supplier_shortage_replacement r
+                JOIN stock_move_line ml ON ml.id = r.stock_move_line_id
+                WHERE r.state = 'verified' AND ml.lot_id = %s AND r.company_id = %s LIMIT 1
+            ''', [self.stock_move_line_id.lot_id.id, self.company_id.id])
+            if self.env.cr.fetchone():
+                raise ValidationError('This serial already has an effective or suspended allocation.')
         uom = self.env['uom.uom'].browse(basis['uom_id'])
         currency = cycle.currency_id
         if uom.compare(claim_used + qty, basis['quantity']) > 0:
@@ -367,7 +388,9 @@ class Replacement(models.Model):
         self._transition({'state': 'verified', 'active_move_id': self.stock_move_id.id, 'approval_id': cycle.id,
                           'currency_id': currency.id, 'claim_uom_id': uom.id, 'approved_qty': basis['quantity'],
                           'approved_value': basis['amount'], 'allocated_qty': qty, 'verified_goods_value': value,
-                          'source_canonical_qty': canonical_qty, 'source_received_qty': net, 'verified_by': self.env.uid,
+                          'source_canonical_qty': canonical_qty,
+                          'source_received_qty': self.product_id.uom_id._compute_quantity(net, self.source_uom_id, round=False),
+                          'verified_by': self.env.uid,
                           'verified_at': fields.Datetime.now()}, 'In-kind recovery verified')
 
     def action_request_recheck(self):
@@ -387,13 +410,14 @@ class Replacement(models.Model):
         if self.state == 'reversed':
             return
         if self.state != 'verified' or self.env.user == self.create_uid or len((self.decision_reason or '').strip()) < 20:
-            raise ValidationError('Reversal requires a verified allocation and an independent reviewer’s documented reason.')
+            raise ValidationError('Reversal requires a verified allocation and an independent reviewerâ€™s documented reason.')
         self.env.cr.execute('UPDATE supplier_shortage_claim SET write_date = write_date WHERE id = %s', [self.claim_id.id])
         self._transition({'state': 'reversed', 'active_move_id': False, 'reversed_at': fields.Datetime.now()},
                          'Recovery reversed')
 
     @api.depends('state', 'source_dirty', 'allocated_qty', 'verified_goods_value', 'claim_id.state',
                  'claim_id.approval_cycle', 'claim_id.approval_status', 'commitment_id.status',
+                 'commitment_id.submission_id.superseded', 'evidence_id.effective_state',
                  'commitment_id.response_id.verification_state')
     @api.depends_context('uid', 'allowed_company_ids')
     def _effective(self):
@@ -401,7 +425,9 @@ class Replacement(models.Model):
             effective = (row.state == 'verified' and not row.source_dirty and row.claim_id.state == 'under_review'
                          and row.claim_id.approval_cycle == row.approval_id.number
                          and row.claim_id.approval_status in ('approved', 'stale')
+                         and (not row.evidence_id or row.evidence_id.effective_state == 'verified')
                          and (not row.commitment_id or (row.commitment_id.has_access('read')
+                              and not row.commitment_id.submission_id.superseded
                               and row.commitment_id.status in ('promised', 'pending')
                               and row.commitment_id.response_id.verification_state == 'verified')))
             row.effective_qty = row.allocated_qty if effective else 0

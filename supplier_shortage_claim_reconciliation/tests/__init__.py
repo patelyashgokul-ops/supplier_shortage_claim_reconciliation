@@ -13,3 +13,4 @@ from . import test_claim_evidence
 from . import test_claim_approval
 from . import test_supplier_submission
 from . import test_supplier_response
+from . import test_replacement_settlement

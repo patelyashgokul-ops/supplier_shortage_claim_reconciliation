@@ -30,7 +30,6 @@ class ClaimSupplierPosition(models.Model):
     current_offer_id = fields.Many2one('supplier.shortage.claim.negotiation',compute='_supplier_position')
     promised_amount = fields.Monetary(compute='_supplier_position',currency_field='supplier_position_currency_id',help='One unambiguous current promise in submitted currency. Multiple potentially overlapping promises require review and are not added.')
     supplier_financial_review = fields.Boolean(compute='_supplier_position')
-    verified_recovery_amount = fields.Monetary(compute='_supplier_position',currency_field='supplier_position_currency_id',help='No verified settlement allocation source exists in Step 14; recovery remains zero.')
     open_dispute_count = fields.Integer(compute='_supplier_position')
     next_supplier_followup = fields.Date(compute='_supplier_position')
     last_supplier_response = fields.Datetime(compute='_supplier_position')
