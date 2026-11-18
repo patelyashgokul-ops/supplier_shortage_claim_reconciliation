@@ -236,7 +236,7 @@ class CreditAllocation(models.Model):
                 if exact.price_subtotal<0 or not math.isfinite(exact.price_subtotal):
                     return 'review',0,reversals,False
                 offset+=exact.price_subtotal
-            signatures.append((reversal.id,exact.id,exact.price_subtotal or 0,exact.price_total or 0))
+            signatures.append((reversal.id,reversal.amount_untaxed,exact.id,exact.price_subtotal or 0,exact.price_total or 0))
         if not math.isfinite(amount) or currency.compare_amounts(amount,0)<=0:
             return 'review',0,reversals,False
         if currency.compare_amounts(offset,amount)>0:
@@ -244,12 +244,16 @@ class CreditAllocation(models.Model):
         net=currency.round(max(amount-offset,0))
         status='reversed' if currency.is_zero(net) else 'partial' if offset else 'posted'
         fp=hashlib.sha256(json.dumps([
-            move.id,move.company_id.id,move.commercial_partner_id.id,str(move.date),move.reversed_entry_id.id,
+            move.id,move.company_id.id,move.commercial_partner_id.id,str(move.date),move.reversed_entry_id.id,move.amount_untaxed,
             currency.id,currency.rounding,line.id,line.product_id.id,line.purchase_line_id.id,amount,
             line.price_total,line.balance,line.amount_currency,line.quantity,line.product_uom_id.id,
             line.product_uom_id.factor,sorted(line.tax_ids.ids),signatures,
         ]).encode()).hexdigest()
         return status,net,reversals,fp
+
+    def _document_capacity(self,reversals):
+        return self.source_currency_id.round(
+            self.credit_move_id.amount_untaxed-sum(reversals.mapped('amount_untaxed')))
 
     def _approval(self):
         claim,line=self.claim_id,self.claim_line_id
@@ -418,6 +422,15 @@ class CreditAllocation(models.Model):
         currency=self.source_currency_id
         if duplicate or currency.compare_amounts(used+self.source_amount,net)>0:
             raise ValidationError('This credit line has insufficient unallocated capacity or an existing match.')
+        self.flush_model(['credit_move_id','source_snapshot_currency_id'])
+        self.env.cr.execute("""
+            SELECT coalesce(sum(source_amount),0),coalesce(bool_or(source_snapshot_currency_id!=%s),false)
+            FROM supplier_shortage_credit_allocation WHERE credit_move_id=%s AND state='verified'
+        """,[currency.id,self.credit_move_id.id])
+        document_used,document_currency_conflict=self.env.cr.fetchone()
+        if (document_currency_conflict
+                or currency.compare_amounts(document_used+self.source_amount,self._document_capacity(reversals))>0):
+            raise ValidationError('The net vendor credit document has insufficient unallocated capacity.')
         if qty and self.credit_line_id.product_uom_id.compare(qty_used+self.source_quantity,self.credit_line_id.quantity)>0:
             raise ValidationError('The source credit quantity is already allocated.')
         goods=self.env['supplier.shortage.replacement']
@@ -532,24 +545,29 @@ class CreditAllocation(models.Model):
                  'credit_move_id.reversal_move_ids.state','evidence_id.effective_state')
     @api.depends_context('uid','allowed_company_ids')
     def _position(self):
-        visible=self.search([('credit_line_id','in',self.credit_line_id.ids),('state','=','verified')]).grouped('credit_line_id')
-        self.flush_model(['credit_line_id','state'])
+        documents=self.credit_move_id.ids
+        visible=self.search([('credit_move_id','in',documents),('state','=','verified')])
+        per_line=visible.grouped('credit_line_id')
+        per_document=visible.grouped('credit_move_id')
+        self.flush_model(['credit_move_id','state'])
         self.env.cr.execute("""
-            SELECT credit_line_id,count(*) FROM supplier_shortage_credit_allocation
-            WHERE credit_line_id=ANY(%s) AND state='verified' GROUP BY credit_line_id
-        """,[self.credit_line_id.ids])
+            SELECT credit_move_id,count(*) FROM supplier_shortage_credit_allocation
+            WHERE credit_move_id=ANY(%s) AND state='verified' GROUP BY credit_move_id
+        """,[documents])
         coverage=dict(self.env.cr.fetchall())
         for row in self:
             row.source_status='review'
             row.available_source=row.effective_value=0
             row.realization='unknown'
             try:
-                status,net,_,fp=row._source()
+                status,net,reversals,fp=row._source()
                 row.source_status=status
-                known=visible.get(row.credit_line_id,self.browse())
-                if (coverage.get(row.credit_line_id.id,0)==len(known)
+                known=per_document.get(row.credit_move_id,self.browse())
+                if (status in ('posted','partial') and coverage.get(row.credit_move_id.id,0)==len(known)
                         and all(item.source_snapshot_currency_id==row.source_currency_id for item in known)):
-                    row.available_source=max(0,net-sum(known.mapped('source_amount')))
+                    line_used=sum(per_line.get(row.credit_line_id,self.browse()).mapped('source_amount'))
+                    document_left=row._document_capacity(reversals)-sum(known.mapped('source_amount'))
+                    row.available_source=max(0,min(net-line_used,document_left))
                 effective=(row.state=='verified' and not row.source_dirty and fp and fp==row.source_fingerprint
                            and status in ('posted','partial') and row.approval_id.number==row.claim_id.approval_cycle
                            and row.claim_id.state=='under_review' and row.claim_id.approval_status in ('approved','stale')
