@@ -247,3 +247,35 @@ class TestCashSettlement(CreditSettlementCase):
         self.assertEqual(first.claim_line_ids.cash_realization,30)
         self.assertEqual(second.claim_line_ids.cash_realization,20)
         self.assertEqual((first.verified_recovery_amount,second.verified_recovery_amount),(40,60))
+
+    def test_distinct_native_matches_on_one_credit_remain_separate(self):
+        claim,_=self._approved()
+        terms=self.env['account.payment.term'].create({'name':'Disposable two installment credit','line_ids':[
+            Command.create({'value':'percent','value_amount':50,'nb_days':0}),
+            Command.create({'value':'percent','value_amount':50,'nb_days':30}),
+        ]})
+        document=self._credit(claim,10,False)
+        document.invoice_payment_term_id=terms
+        document.action_post()
+        credit=self._review(self._proposal(claim,document,100))
+        credit.action_verify()
+        payable=self.accounts[claim.company_id.id]['payable']
+        bank=self._bank(claim,60,payable)
+        line=bank._seek_for_lines()[2]
+        (line | document.line_ids.filtered(lambda item:item.account_id==payable)).reconcile()
+        partials=line.matched_debit_ids
+        self.assertEqual(len(partials),2)
+        ambiguous=self._cash(claim,line,10,kind='credit',bank=bank,credit_id=credit.id)
+        ambiguous.action_submit()
+        with self.assertRaises(ValidationError),self.env.cr.savepoint():
+            ambiguous.with_user(self.reviewer).action_accounts()
+        rows=self.env[CASH]
+        for partial in partials:
+            cash=self._review(self._cash(claim,line,partial.credit_amount_currency,kind='credit',
+                bank=bank,credit_id=credit.id,reconcile_match_id=partial.id))
+            cash.action_verify()
+            rows|=self.env[CASH].browse(cash.id)
+        self.assertEqual(rows.partial_id,partials)
+        self.assertEqual(sum(rows.mapped('realized_value')),60)
+        self.assertEqual(claim.claim_line_ids.remaining_realization,40)
+        self.assertEqual(claim.verified_recovery_amount,100)

@@ -15,7 +15,7 @@ MODEL = 'supplier.shortage.cash.settlement'
 KINDS = [('review','Unclassified receipt'),('direct','Direct claim refund'),
          ('credit','Credit-linked refund'),('offset','Credit payable offset'),('unrelated','Unrelated receipt')]
 INPUTS = {'claim_line_id','source_line_id','bank_id','payment_id','credit_id','kind','gross_amount',
-          'untaxed_amount','evidence_id','note','reason'}
+          'untaxed_amount','evidence_id','note','reason','reconcile_match_id'}
 
 
 def cash_hold(line):
@@ -103,6 +103,7 @@ class CashSettlement(models.Model):
     payment_id=fields.Many2one('account.payment',check_company=True,ondelete='set null',index=True)
     credit_id=fields.Many2one('supplier.shortage.credit.allocation',check_company=True,ondelete='restrict',index=True)
     credit_move_id=fields.Many2one(related='credit_id.credit_move_id',store=True,index=True,compute_sudo=False)
+    reconcile_match_id=fields.Many2one('account.partial.reconcile',ondelete='set null')
     partial_id=fields.Many2one('account.partial.reconcile',readonly=True,ondelete='set null',index=True,copy=False)
     kind=fields.Selection(KINDS,required=True,default='review')
     source_currency_id=fields.Many2one(related='source_line_id.currency_id',compute_sudo=False)
@@ -144,7 +145,7 @@ class CashSettlement(models.Model):
         domain=super()._access_domain(operation) & Domain('claim_line_id','access','read')
         if not self.env['account.move.line'].has_access('read'):
             return Domain.FALSE
-        for name in ('source_line_id','source_move_id','bank_id','payment_id','credit_id','evidence_id','partial_id'):
+        for name in ('source_line_id','source_move_id','bank_id','payment_id','credit_id','evidence_id','partial_id','reconcile_match_id'):
             domain &= Domain(name,'=',False) | Domain(name,'access','read')
         return domain & ~Domain('reversal_ids','any!',~Domain('id','access','read'))
 
@@ -279,7 +280,7 @@ class CashSettlement(models.Model):
                                                     abs(other.amount_currency))):
                     raise ValidationError('Separate any unresolved payable, fee or adjustment before direct attribution.')
                 mixed_signature.append([other.id,other.amount_currency,sorted(matches.ids)])
-            if (credit or payment or line.account_id.reconcile
+            if (credit or payment or self.reconcile_match_id or line.account_id.reconcile
                     or line.account_id.account_type not in ('income_other','income','expense','expense_direct_cost')
                     or line.matched_debit_ids or line.matched_credit_ids or line.tax_ids or line.tax_line_id):
                 raise ValidationError('A direct refund requires an independent, untaxed non-payable bank counterpart.')
@@ -297,6 +298,8 @@ class CashSettlement(models.Model):
             matches.check_access('read')
             matches.debit_move_id.check_access('read')
             partial=matches.filtered(lambda item:item.debit_move_id.move_id==credit.credit_move_id)
+            if self.reconcile_match_id:
+                partial &= self.reconcile_match_id
             if (len(partial)!=1 or partial.debit_move_id.account_id!=line.account_id
                     or partial.debit_move_id.partner_id.commercial_partner_id!=partner
                     or partial.debit_move_id.currency_id!=currency):
@@ -388,12 +391,13 @@ class CashSettlement(models.Model):
                    coalesce(sum(gross_amount) FILTER (WHERE partial_id=%s),0),
                    coalesce(sum(gross_amount) FILTER (WHERE credit_id=%s),0),
                    coalesce(sum(realized_snapshot) FILTER (WHERE credit_id=%s),0),
-                   coalesce(bool_or(source_line_id=%s AND claim_line_id=%s AND credit_id IS NOT DISTINCT FROM %s),false),
+                   coalesce(bool_or(source_line_id=%s AND claim_line_id=%s AND credit_id IS NOT DISTINCT FROM %s
+                       AND partial_id IS NOT DISTINCT FROM %s),false),
                    coalesce(bool_or(frozen_source_currency_id!=%s),false)
             FROM supplier_shortage_cash_settlement WHERE state='verified'
               AND (source_line_id=%s OR bank_id=%s OR credit_id=%s OR partial_id=%s)
         """,[self.source_line_id.id,self.bank_id.id or None,partial.id or None,self.credit_id.id or None,
-              self.credit_id.id or None,self.source_line_id.id,self.claim_line_id.id,self.credit_id.id or None,
+              self.credit_id.id or None,self.source_line_id.id,self.claim_line_id.id,self.credit_id.id or None,partial.id or None,
               self.source_currency_id.id,self.source_line_id.id,self.bank_id.id or None,self.credit_id.id or None,partial.id or None])
         line_used,bank_used,matched_used,credit_used,realized,duplicate,currency_conflict=self.env.cr.fetchone()
         source=self.source_currency_id
@@ -525,15 +529,17 @@ class CashClaimLine(models.Model):
 class CashClaim(models.Model):
     _inherit='supplier.shortage.claim'
     cash_settlement_ids=fields.One2many(MODEL,'claim_id',readonly=True,copy=False)
+    cash_realization_line_ids=fields.One2many('supplier.shortage.claim.line','claim_id',readonly=True,copy=False)
 
     @api.model_create_multi
     def create(self,values):
-        if any('cash_settlement_ids' in vals for vals in values) or 'default_cash_settlement_ids' in self.env.context:
+        outputs={'cash_settlement_ids','cash_realization_line_ids'}
+        if any(outputs & vals.keys() for vals in values) or any('default_'+name in self.env.context for name in outputs):
             raise AccessError('Open the Cash Recovery workbench to manage settlements.')
         return super().create(values)
 
     def write(self,values):
-        if 'cash_settlement_ids' in values:
+        if {'cash_settlement_ids','cash_realization_line_ids'} & values.keys():
             raise AccessError('Open the Cash Recovery workbench to manage settlements.')
         return super().write(values)
 
@@ -579,7 +585,7 @@ class CashPartialReconcile(models.Model):
                                 companies=moves.company_id.ids)
         result=super().unlink()
         if self.env.registry.ready:
-            self.env[MODEL].invalidate_model(['partial_id','source_status','effective_value','realized_value'],flush=False)
+            self.env[MODEL].invalidate_model(['partial_id','reconcile_match_id','source_status','effective_value','realized_value'],flush=False)
         return result
 
 
@@ -684,6 +690,7 @@ class CashMatchingWizard(models.TransientModel):
     source_line_id=fields.Many2one('account.move.line',required=True)
     bank_id=fields.Many2one('account.bank.statement.line')
     payment_id=fields.Many2one('account.payment')
+    reconcile_match_id=fields.Many2one('account.partial.reconcile')
     credit_id=fields.Many2one('supplier.shortage.credit.allocation')
     evidence_id=fields.Many2one('supplier.shortage.claim.evidence')
     kind=fields.Selection(KINDS,required=True,default='review')
@@ -713,6 +720,10 @@ class CashMatchingWizard(models.TransientModel):
                 raise ValidationError('Select a source for the claim supplier.')
             if wizard.payment_id and wizard.payment_id.move_id!=wizard.source_line_id.move_id:
                 raise ValidationError('Select the payment that owns the source item.')
+            if wizard.reconcile_match_id:
+                wizard.reconcile_match_id.check_access('read')
+                if wizard.reconcile_match_id.credit_move_id!=wizard.source_line_id:
+                    raise ValidationError('Select a native reconciliation of the source accounting line.')
             if wizard.credit_id and wizard.credit_id.claim_line_id!=wizard.claim_line_id:
                 raise ValidationError('Select a credit allocation for this claim line.')
             if wizard.evidence_id and wizard.claim_line_id not in wizard.evidence_id._scope_lines():
@@ -738,8 +749,34 @@ class CashMatchingWizard(models.TransientModel):
 
     def action_check_source(self):
         proposal=self.env[MODEL].new(self._proposal())
-        _,_,cap,_=proposal._evidence()
-        return self._notice(self.env._('Source verified. Eligible gross source amount before existing allocations: %s.',cap))
+        _,partial,cap,bank_cap=proposal._evidence()
+        model=self.env[MODEL]
+        model.flush_model(['state','source_line_id','bank_id','partial_id','credit_id'])
+        keys={'source_line_id':self.source_line_id.id,'bank_id':self.bank_id.id or None,
+              'partial_id':partial.id or None,'credit_id':self.credit_id.id or None}
+        domain=Domain.FALSE
+        for name,id_ in keys.items():
+            if id_:
+                domain |= Domain(name,'=',id_)
+        visible=model.search(domain & Domain('state','=','verified'))
+        self.env.cr.execute("""
+            SELECT count(*) FROM supplier_shortage_cash_settlement WHERE state='verified'
+              AND (source_line_id=%s OR bank_id=%s OR partial_id=%s OR credit_id=%s)
+        """,list(keys.values()))
+        if (self.env.cr.fetchone()[0]!=len(visible)
+                or any(row.frozen_source_currency_id!=self.source_currency_id for row in visible)):
+            return self._notice(self.env._('Source verified. Available allocation requires Accounts review.'))
+        def used(name):
+            return sum(row.gross_amount for row in visible if row[name].id==keys[name])
+        limits=[abs(self.source_line_id.amount_currency)-used('source_line_id')]
+        if self.bank_id:
+            limits.append(bank_cap-used('bank_id'))
+        if partial:
+            limits.append(cap-used('partial_id'))
+        if self.credit_id:
+            limits.append(self.credit_id.source_amount+self.credit_id.source_tax-used('credit_id'))
+        remaining=self.source_currency_id.round(min(limits))
+        return self._notice(self.env._('Source verified. Remaining gross allocation capacity: %s.',remaining))
 
     def action_preview(self):
         proposal=self.env[MODEL].new(self._proposal())
@@ -764,7 +801,7 @@ class CashMatchingWizard(models.TransientModel):
         self._proposal()
         row=self.settlement_id
         fields_to_match=('claim_line_id','source_line_id','bank_id','payment_id','credit_id','evidence_id',
-                         'kind','gross_amount','untaxed_amount')
+                         'kind','gross_amount','untaxed_amount','reconcile_match_id')
         if not row or any(row[name]!=self[name] for name in fields_to_match):
             raise ValidationError('Select the finance-reviewed allocation for this claim and source.')
         row.action_verify()

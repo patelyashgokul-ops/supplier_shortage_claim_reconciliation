@@ -66,6 +66,7 @@
                             <field name="bank_id" readonly="state != 'draft'" options="{'no_create':True}"
                                    domain="[('company_id','=',company_id),('amount','&gt;',0)]"/>
                             <field name="source_status" widget="badge"/><field name="accounting_date"/><field name="bank_date"/>
+                            <field name="reconcile_match_id" readonly="state != 'draft'" invisible="kind not in ('credit','offset')" options="{'no_create': True}" domain="[('credit_move_id','=',source_line_id)]"/>
                             <field name="partial_id"/><field name="source_dirty" invisible="True"/>
                         </group>
                     </group>
@@ -103,8 +104,21 @@
                 <button name="action_open_cash" type="object" string="Cash and Payable Settlements" class="btn-secondary"/>
             </xpath>
             <xpath expr="//field[@name='credit_summary_line_ids']/list/field[@name='credit_value']" position="after">
-                <field name="cash_value" string="Direct Cash"/><field name="total_resolution" string="Total Resolution"/><field name="cash_realization" string="Credit Bank Realization"/>
-                <field name="payable_realization" string="Credit Payable Offset"/><field name="remaining_realization" string="Credit Realization Remaining"/>
+                <field name="cash_value" string="Direct Cash"/><field name="total_resolution" string="Total Resolution"/>
+            </xpath>
+            <xpath expr="//page[@name='financial_settlements']/field[@name='credit_summary_line_ids']" position="before">
+                <separator string="Claim Resolution"/>
+                <group string="Supplier Commitments"><field name="supplier_position_currency_id" invisible="True"/><field name="promised_amount" string="Current Promised Amount"/></group>
+            </xpath>
+            <xpath expr="//page[@name='financial_settlements']/field[@name='credit_summary_line_ids']" position="after">
+                <separator string="Credit Realization"/>
+                <field name="cash_realization_line_ids" readonly="True"><list create="false" delete="false">
+                    <field name="product_id"/><field name="currency_id" column_invisible="True"/>
+                    <field name="credit_value" string="Effective Credit"/>
+                    <field name="cash_realization" string="Cash Realized"/>
+                    <field name="payable_realization" string="Payable Offset"/>
+                    <field name="remaining_realization" string="Remaining Realization"/>
+                </list></field>
             </xpath>
             <xpath expr="//page[@name='financial_settlements']/field[@name='credit_allocation_ids']" position="after">
                 <field name="cash_settlement_ids"><list create="false" delete="false">
@@ -160,6 +174,7 @@
                         <field name="payment_id" options="{'no_create': True}" domain="[('company_id','=',company_id)]"/>
                         <field name="bank_id" options="{'no_create': True}" domain="[('company_id','=',company_id)]"/>
                         <field name="credit_id" options="{'no_create': True}" domain="[('claim_line_id','=',claim_line_id)]"/>
+                        <field name="reconcile_match_id" invisible="kind not in ('credit','offset')" options="{'no_create': True}" domain="[('credit_move_id','=',source_line_id)]"/>
                         <field name="evidence_id" options="{'no_create': True}"/>
                         <field name="source_currency_id"/><field name="gross_amount"/>
                         <field name="untaxed_amount" invisible="kind!='direct'"/>
