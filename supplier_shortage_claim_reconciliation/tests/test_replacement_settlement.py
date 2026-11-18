@@ -65,6 +65,10 @@ class TestReplacementSettlement(SupplierSubmissionCase):
         self.initial_receipt_qty = 80
         claim, promise = self._promised()
         self.assertEqual(claim.verified_recovery_amount, 0)
+        supplier_dispatch = promise.with_user(self.sender)
+        supplier_dispatch.status_note = 'Supplier reports shipment. Warehouse has yet to receive and validate the goods.'
+        supplier_dispatch.action_pending_verification()
+        self.assertEqual(claim.verified_recovery_amount, 0)
         approved = claim.verified_amount
         stock = claim.purchase_id
         move_a = additional_receipt(stock, 4).move_ids
@@ -101,6 +105,15 @@ class TestReplacementSettlement(SupplierSubmissionCase):
         claim, promise = self._promised()
         move = additional_receipt(claim.purchase_id, 7).move_ids
         row = self._draft(claim, promise, move, 5)
+        spoofed_default = self.env['supplier.shortage.replacement'].with_user(self.maker).with_context(
+            default_state='verified', default_verified_goods_value=1000000)
+        forged = spoofed_default.create({
+            'claim_line_id': claim.claim_line_ids.id, 'stock_move_id': move.id,
+            'commitment_id': promise.id, 'source_qty': 1,
+            'note': 'Documented proposal is awaiting authorized physical and financial review.',
+        })
+        self.assertEqual(forged.state, 'draft')
+        self.assertEqual(forged.verified_goods_value, 0)
         with self.assertRaises(AccessError), self.env.cr.savepoint():
             row.write({'state': 'verified'})
         with self.assertRaises(AccessError), self.env.cr.savepoint():
@@ -177,6 +190,14 @@ class TestReplacementSettlement(SupplierSubmissionCase):
             row.with_user(self.warehouse).action_warehouse_verify()
         self._validate(picking)
         row.with_user(self.warehouse).action_warehouse_verify()
+        unproven = self.env['supplier.shortage.replacement'].with_user(self.maker).create({
+            'claim_line_id': line.id, 'stock_move_id': source.id, 'source_qty': 4,
+            'substitute_claim_qty': 4, 'note': 'The stock item exists but the terms are awaiting supplier evidence.',
+        })
+        self._review(unproven)
+        with self.assertRaisesRegex(ValidationError, 'verified supplier evidence'), self.env.cr.savepoint():
+            unproven.with_user(self.finance).action_verify()
+        self.assertEqual(unproven.effective_qty, 0)
         row.with_user(self.finance).action_verify()
         self.assertEqual(row.effective_qty, 3)
         self.assertEqual(row.effective_value, claim.currency_id.round(claim.verified_amount * 3 / 15))
