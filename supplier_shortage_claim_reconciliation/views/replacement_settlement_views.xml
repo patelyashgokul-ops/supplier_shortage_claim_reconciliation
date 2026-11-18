@@ -1,0 +1,170 @@
+﻿<odoo>
+    <record id="view_replacement_search" model="ir.ui.view">
+        <field name="name">supplier.shortage.replacement.search</field>
+        <field name="model">supplier.shortage.replacement</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="claim_id"/>
+                <field name="supplier_id"/>
+                <field name="product_id"/>
+                <field name="company_id"/>
+                <field name="stock_move_id"/>
+                <filter name="pending_receipt" string="Pending Receipt" domain="[('state','=','receipt')]"/>
+                <filter name="pending_review" string="Pending Verification" domain="[('state','in',['review','finance'])]"/>
+                <filter name="verified" string="Verified" domain="[('state','=','verified'),('source_dirty','=',False)]"/>
+                <filter name="source_review" string="Source Changed" domain="[('source_dirty','=',True),('state','in',['finance','verified'])]"/>
+                <filter name="reversed" string="Reversed" domain="[('state','=','reversed')]"/>
+            </search>
+        </field>
+    </record>
+    <record id="view_replacement_list" model="ir.ui.view">
+        <field name="name">supplier.shortage.replacement.list</field>
+        <field name="model">supplier.shortage.replacement</field>
+        <field name="arch" type="xml">
+            <list decoration-warning="source_dirty and state != 'reversed'">
+                <field name="claim_id"/>
+                <field name="supplier_id"/>
+                <field name="company_id" groups="base.group_multi_company"/>
+                <field name="claim_line_id" optional="hide"/>
+                <field name="product_id"/>
+                <field name="picking_id"/>
+                <field name="warehouse_id" optional="show"/>
+                <field name="source_qty" optional="show"/>
+                <field name="source_uom_id" optional="hide"/>
+                <field name="effective_qty"/>
+                <field name="claim_uom_id" optional="hide"/>
+                <field name="effective_value"/>
+                <field name="currency_id" column_invisible="True"/>
+                <field name="state" widget="badge" decoration-success="state == 'verified' and not source_dirty"
+                       decoration-warning="state in ('receipt','review','finance') or source_dirty"/>
+                <field name="source_dirty" optional="hide"/>
+                <field name="verified_by" optional="hide"/>
+                <field name="write_date" optional="hide"/>
+            </list>
+        </field>
+    </record>
+    <record id="view_replacement_form" model="ir.ui.view">
+        <field name="name">supplier.shortage.replacement.form</field>
+        <field name="model">supplier.shortage.replacement</field>
+        <field name="arch" type="xml">
+            <form delete="false" duplicate="false">
+                <header>
+                    <button name="action_request_verification" type="object" string="Request Warehouse Review"
+                            class="oe_highlight" invisible="state not in ('draft','receipt')" groups="group_claim_user"/>
+                    <button name="action_warehouse_verify" type="object" string="Confirm Physical Receipt"
+                            class="oe_highlight" invisible="state not in ('review','receipt')" groups="group_warehouse_reviewer"/>
+                    <button name="action_verify" type="object" string="Authorize Goods Recovery"
+                            class="oe_highlight" invisible="state != 'finance' or source_dirty" groups="group_finance_manager"/>
+                    <button name="action_request_recheck" type="object" string="Request Warehouse Recheck"
+                            invisible="state != 'finance'" groups="group_finance_manager"/>
+                    <button name="action_reject" type="object" string="Reject" invisible="state not in ('receipt','review','finance')"
+                            groups="group_finance_manager"/>
+                    <button name="action_reverse" type="object" string="Reverse Recovery" invisible="state != 'verified'"
+                            groups="group_finance_manager"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,receipt,review,finance,verified"/>
+                </header>
+                <sheet>
+                    <div class="alert alert-warning" role="alert" invisible="not source_dirty or state == 'reversed'">
+                        Source changed. Review the evidence before reconciling this allocation.
+                    </div>
+                    <group>
+                        <group string="Claim and Supplier Terms">
+                            <field name="claim_id"/>
+                            <field name="claim_line_id" readonly="state != 'draft'" options="{'no_create': True}"/>
+                            <field name="supplier_id"/>
+                            <field name="commitment_id" readonly="state != 'draft'"
+                                   domain="[('claim_line_id','=',claim_line_id),('commitment_type','=','replacement')]"
+                                   options="{'no_create': True}"/>
+                            <field name="evidence_id" readonly="state != 'draft'"
+                                   domain="[('claim_line_id','=',claim_line_id)]" options="{'no_create': True}"/>
+                            <field name="promised_qty" invisible="not commitment_id"/>
+                            <field name="remaining_promise_qty" invisible="not commitment_id"/>
+                        </group>
+                        <group string="Physical Receipt">
+                            <field name="company_id" groups="base.group_multi_company"/>
+                            <field name="stock_move_id" readonly="state != 'draft'" options="{'no_create': True}"/>
+                            <field name="picking_id"/>
+                            <field name="warehouse_id"/>
+                            <field name="product_id"/>
+                            <field name="stock_move_line_id" readonly="state != 'draft'"
+                                   domain="[('move_id','=',stock_move_id)]" options="{'no_create': True}"/>
+                            <field name="source_qty" readonly="state != 'draft'"/>
+                            <field name="source_uom_id"/>
+                            <field name="substitute_claim_qty" readonly="state != 'draft'"/>
+                        </group>
+                    </group>
+                    <group>
+                        <field name="note" readonly="state != 'draft'"/>
+                        <field name="decision_reason" readonly="state in ('rejected','reversed')"/>
+                    </group>
+                    <group>
+                        <group string="Approved and Recovered" invisible="not approval_id">
+                            <field name="approval_id"/>
+                            <field name="claim_uom_id"/>
+                            <field name="approved_qty"/>
+                            <field name="approved_value"/>
+                            <field name="allocated_qty"/>
+                            <field name="verified_goods_value"/>
+                            <field name="effective_qty"/>
+                            <field name="effective_value"/>
+                            <field name="currency_id" invisible="True"/>
+                        </group>
+                        <group string="Review History">
+                            <field name="warehouse_by"/>
+                            <field name="warehouse_at"/>
+                            <field name="verified_by"/>
+                            <field name="verified_at"/>
+                            <field name="reversed_at" invisible="not reversed_at"/>
+                            <field name="source_dirty" invisible="True"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="action_replacement" model="ir.actions.act_window">
+        <field name="name">Replacement Goods</field>
+        <field name="res_model">supplier.shortage.replacement</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_replacement_search"/>
+    </record>
+    <menuitem id="menu_settlements" name="Settlements" parent="menu_recovery_root" sequence="50"/>
+    <menuitem id="menu_replacement" name="Replacement Goods" parent="menu_settlements" action="action_replacement" sequence="10"/>
+    <record id="view_claim_replacement" model="ir.ui.view">
+        <field name="name">supplier.shortage.claim.form.replacement</field>
+        <field name="model">supplier.shortage.claim</field>
+        <field name="inherit_id" ref="view_claim_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//notebook" position="inside">
+                <page name="replacement_settlement" string="Replacement Goods"
+                      groups="group_claim_user,group_warehouse_reviewer,group_accounts_reviewer">
+                    <button name="action_open_replacements" type="object" string="Open Replacement Workbench" class="btn-secondary"/>
+                    <field name="claim_line_ids" readonly="True">
+                        <list create="false" delete="false">
+                            <field name="product_id"/>
+                            <field name="replacement_approved_qty" string="Approved"/>
+                            <field name="replacement_promised_qty" string="Promised"/>
+                            <field name="replacement_qty" string="Verified"/>
+                            <field name="replacement_reversed_qty" string="Reversed"/>
+                            <field name="replacement_remaining_qty" string="Remaining"/>
+                            <field name="replacement_value" string="Goods Recovery"/>
+                            <field name="replacement_unresolved_value" string="Unresolved Value"/>
+                            <field name="currency_id" column_invisible="True"/>
+                        </list>
+                    </field>
+                    <field name="replacement_ids" readonly="True">
+                        <list create="false" delete="false">
+                            <field name="picking_id"/>
+                            <field name="stock_move_id"/>
+                            <field name="commitment_id" groups="group_claim_user,group_accounts_reviewer"/>
+                            <field name="warehouse_by"/>
+                            <field name="effective_qty"/>
+                            <field name="state" widget="badge"/>
+                            <field name="source_dirty"/>
+                        </list>
+                    </field>
+                </page>
+            </xpath>
+        </field>
+    </record>
+</odoo>

@@ -6,6 +6,8 @@ It shares the source transaction and exposes no claim IDs or totals to the calle
 """
 from odoo import api, models
 
+from .replacement_settlement import mark_replacements
+
 PHYSICAL=('receipt','challan','packing','count','photo','return','quality','warehouse_report','lot')
 FINANCIAL=('bill','bill_line','credit','account_note')
 
@@ -18,6 +20,8 @@ def invalidate_lines(env, line_ids, reason, kind='all'):
                         ('supplier.shortage.claim.evidence',['claim_id','scope_line_ids','is_current','is_stale']),
                         ('supplier.shortage.claim',['readiness_dirty'])]:
         env[model].flush_model(names)
+    if kind not in ('receiving', 'candidate'):
+        mark_replacements(env, line_ids=line_ids, reason=reason)
     types=PHYSICAL if kind=='receiving' else FINANCIAL if kind=='billing' else ()
     clause='AND e.evidence_type IN %s' if types else 'AND FALSE' if kind=='candidate' else ''
     params=[line_ids]
@@ -110,16 +114,41 @@ class SourcePurchase(models.Model):
         return result
 
 
+def replacement_stock_changed(env, moves, before=()):
+    if not env.registry.ready:
+        return
+    moves.flush_recordset(['state', 'origin_returned_move_id', 'location_id', 'location_dest_id'])
+    ids = set(before)
+    for move in moves.filtered(lambda m: m.state == 'done'):
+        if move.location_id.usage == 'supplier' and move.location_dest_id.usage == 'internal':
+            ids.add(move.id)
+        elif move.location_dest_id.usage == 'supplier' and move.origin_returned_move_id:
+            ids.add(move.origin_returned_move_id.id)
+    mark_replacements(env, move_ids=ids, reason='Completed receipt evidence or linked supplier return changed.')
+
+
 class SourceStockMove(models.Model):
     _inherit='stock.move'
     @api.model_create_multi
     def create(self, vals_list):
         records=super().create(vals_list)
+        replacement_stock_changed(self.env, records)
         invalidate_po_lines(self.env,from_moves(self.env,records.ids),'receiving')
         return records
     def write(self, vals):
+        material = {'state','quantity','uom_id','purchase_line_id','origin_returned_move_id',
+                    'location_id','location_dest_id','product_id','picking_id','picking_type_id','date','company_id'}
+        old = set()
+        if vals.keys() & material:
+            for move in self.filtered(lambda m: m.state == 'done'):
+                if move.location_id.usage == 'supplier':
+                    old.add(move.id)
+                if move.location_dest_id.usage == 'supplier' and move.origin_returned_move_id:
+                    old.add(move.origin_returned_move_id.id)
         before=from_moves(self.env,self.ids) if vals.keys() & {'purchase_line_id','origin_returned_move_id','move_orig_ids'} else []
         result=super().write(vals)
+        if vals.keys() & material:
+            replacement_stock_changed(self.env, self, old)
         if vals.keys() & {'state','quantity','uom_id','product_uom_qty','purchase_line_id','origin_returned_move_id','move_orig_ids','to_refund','location_id','location_dest_id','date'}:
             invalidate_po_lines(self.env,before+from_moves(self.env,self.ids),'receiving')
         return result
@@ -139,10 +168,12 @@ class SourceMoveLine(models.Model):
     @api.model_create_multi
     def create(self,vals_list):
         records=super().create(vals_list)
+        replacement_stock_changed(self.env, records.move_id)
         invalidate_po_lines(self.env,from_moves(self.env,records.move_id.ids),'receiving')
         return records
     def unlink(self):
-        ids=from_moves(self.env,self.move_id.ids)
+        moves = self.move_id
+        ids=from_moves(self.env,moves.ids)
         result=super().unlink()
         invalidate_po_lines(self.env,ids,'receiving')
         return result
@@ -150,7 +181,8 @@ class SourceMoveLine(models.Model):
     def write(self,vals):
         moves=self.move_id.ids
         result=super().write(vals)
-        if vals.keys() & {'quantity','uom_id','move_id','location_id','location_dest_id'}:
+        if vals.keys() & {'quantity','uom_id','move_id','location_id','location_dest_id','lot_id','owner_id'}:
+            replacement_stock_changed(self.env, self.env['stock.move'].browse(moves) | self.move_id)
             invalidate_po_lines(self.env,from_moves(self.env,moves+self.move_id.ids),'receiving')
         return result
 
@@ -159,7 +191,8 @@ class SourcePicking(models.Model):
     _inherit='stock.picking'
     def write(self,vals):
         result=super().write(vals)
-        if vals.keys() & {'state','backorder_id','location_id','location_dest_id'}:
+        if vals.keys() & {'state','backorder_id','location_id','location_dest_id','partner_id','picking_type_id'}:
+            replacement_stock_changed(self.env, self.move_ids)
             invalidate_po_lines(self.env,from_moves(self.env,self.move_ids.ids),'receiving')
         return result
 
