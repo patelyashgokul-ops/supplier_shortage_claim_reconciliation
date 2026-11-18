@@ -251,6 +251,27 @@ class TestCashSettlement(CreditSettlementCase):
         foreign=self._bank(unrelated,10,self.accounts[self.other.id]['expense'])
         with self.assertRaises((AccessError,ValidationError)),self.env.cr.savepoint():
             wizard_model.create(dict(values,source_line_id=foreign._seek_for_lines()[2].id,bank_id=foreign.id))
+        memo=wizard_model.create(dict(values,evidence_id=False,note='Claim reference '+claim.name+' entered in the remittance memo.'))
+        with self.assertRaisesRegex(ValidationError,'independently verified'),self.env.cr.savepoint():
+            memo.action_check_source()
+        fee_bank=self.env['account.bank.statement.line'].create({
+            'payment_ref':'Net bank amount after fee','journal_id':journal.id,'partner_id':claim.partner_id.id,
+            'date':claim.claim_date,'amount':19,'line_ids':[
+                item(journal.default_account_id,19),item(accounts['expense'],-20),item(accounts['expense'],1)],
+        })
+        fee_direct=fee_bank.move_id.line_ids.filtered(lambda row:row.balance==-20)
+        fee=wizard_model.create(dict(values,source_line_id=fee_direct.id,bank_id=fee_bank.id,
+                                     gross_amount=19,untaxed_amount=19))
+        with self.assertRaisesRegex(ValidationError,'fee or adjustment'),self.env.cr.savepoint():
+            fee.action_check_source()
+        transit=self.env['account.account'].create({
+            'name':'Disposable interbank transfer','code':'S17T','account_type':'asset_current',
+            'company_ids':[Command.set(claim.company_id.ids)]})
+        transfer=self._bank(claim,20,transit)
+        transfer_wizard=wizard_model.create(dict(values,source_line_id=transfer._seek_for_lines()[2].id,
+                                                  bank_id=transfer.id))
+        with self.assertRaisesRegex(ValidationError,'non-payable bank counterpart'),self.env.cr.savepoint():
+            transfer_wizard.action_check_source()
 
     def test_realization_is_explicit_across_claims_sharing_one_credit(self):
         candidate=self._candidates()
