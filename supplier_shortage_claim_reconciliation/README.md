@@ -1360,8 +1360,9 @@ An unlinked credit line requires independently verified claim-specific evidence.
 A supplier promise is a commitment. A posted Vendor Credit Note is an accounting
 source. Claim recovery starts with an independently verified allocation of a
 posted, attributable credit. A claim may use several credit notes, and different
-claims may share one credit line within its unreversed untaxed capacity. One
-active match per credit line and claim line prevents duplicates. Quantity-based
+claims may share one credit line within its unreversed untaxed capacity. The
+net document total also caps allocations across its lines, including when a
+separate negative adjustment offsets part of a positive line. One active match per credit line and claim line prevents duplicates. Quantity-based
 credits must tie to the source and the approved unit value. Value-only credits
 resolve money and carry zero resolution quantity.
 
@@ -1373,10 +1374,13 @@ requiring review. Local-currency allocations use authoritative posted subtotals.
 Tax is shown separately from recovery over the native line subtotal and total.
 Currency, company carrying value, accounting date and the documented Odoo FX
 rates are retained with the allocation. The conversion uses the accounting date
-and requires documented historical rates. Tax and company carrying amounts use
+and requires documented historical rates. A change to a rate used in the
+approval suspends the affected allocation for review. Tax and company carrying amounts use
 cumulative proportional rounding within each source line.
 
-The workbench reads posted native reversals by accounting relationship. A unique,
+The workbench reads posted native reversals by accounting relationship. It also
+recognizes explicitly linked debit notes when the Community debit-note addon is
+installed. A unique,
 compatible reversal line reduces available untaxed source capacity. For a
 material correction the original allocation is suspended, Finance records a
 reversal, and the retained amount can be proposed again. Ambiguous line mapping,

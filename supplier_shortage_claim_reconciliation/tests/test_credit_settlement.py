@@ -134,6 +134,9 @@ class TestCreditSettlement(SupplierSubmissionCase):
 
     def test_source_authorization_and_forged_wizard(self):
         claim,_=self._approved()
+        original=claim.claim_line_ids.purchase_line_id.invoice_lines.move_id
+        with self.assertRaisesRegex(ValidationError,'vendor credit product line'),self.env.cr.savepoint():
+            self._proposal(claim,original,20)
         wrong=self._bill([(self._order(10).order_line,2)],True,move_type='in_refund')
         with self.assertRaises(ValidationError),self.env.cr.savepoint():
             self._proposal(claim,wrong,20)
@@ -145,10 +148,11 @@ class TestCreditSettlement(SupplierSubmissionCase):
             wizard.action_propose()
         self.assertFalse(self.env[CREDIT].with_user(self.maker).search([('credit_move_id','=',wrong_company.id)]))
         credit=self._credit(claim,5)
-        row=self._proposal(claim,credit,25,purpose='rebate')
-        row.action_submit()
-        with self.assertRaisesRegex(ValidationError,'shortage-resolution'),self.env.cr.savepoint():
-            row.with_user(self.reviewer).action_accounts()
+        for purpose in ('rebate','tax','return'):
+            row=self._proposal(claim,credit,25,purpose=purpose)
+            row.action_submit()
+            with self.assertRaisesRegex(ValidationError,'shortage-resolution'),self.env.cr.savepoint():
+                row.with_user(self.reviewer).action_accounts()
         with self.assertRaises(AccessError),self.env.cr.savepoint():
             row.action_verify()
         with self.assertRaises(AccessError),self.env.cr.savepoint():
