@@ -11,7 +11,7 @@ from .test_supplier_submission import M, SupplierSubmissionCase
 CREDIT='supplier.shortage.credit.allocation'
 
 
-class TestCreditSettlement(SupplierSubmissionCase):
+class CreditSettlementCase(SupplierSubmissionCase):
 
     @classmethod
     def setUpClass(cls):
@@ -34,6 +34,8 @@ class TestCreditSettlement(SupplierSubmissionCase):
         row.action_submit()
         row.with_user(self.reviewer).action_accounts()
         return row.with_user(self.finance)
+
+class TestCreditSettlement(CreditSettlementCase):
 
     def test_posting_purpose_tax_and_payable_realization(self):
         claim,_=self._approved()
@@ -141,11 +143,10 @@ class TestCreditSettlement(SupplierSubmissionCase):
         with self.assertRaises(ValidationError),self.env.cr.savepoint():
             self._proposal(claim,wrong,20)
         wrong_company=self._bill([(self._order(10,warehouse=self.other_wh).order_line,2)],True,move_type='in_refund')
-        wizard=self.env['supplier.shortage.credit.matching'].with_user(self.maker).create({
-            'claim_line_id':claim.claim_line_ids.id,'credit_line_id':wrong_company.invoice_line_ids.id,'source_amount':20,
-            'note':'This forged wizard requests a credit belonging to an unrelated company.'})
         with self.assertRaises((AccessError,ValidationError)),self.env.cr.savepoint():
-            wizard.action_propose()
+            self.env['supplier.shortage.credit.matching'].with_user(self.maker).create({
+                'claim_line_id':claim.claim_line_ids.id,'credit_line_id':wrong_company.invoice_line_ids.id,
+                'source_amount':20,'note':'A forged wizard requests a credit belonging to an unrelated company.'})
         self.assertFalse(self.env[CREDIT].with_user(self.maker).search([('credit_move_id','=',wrong_company.id)]))
         credit=self._credit(claim,5)
         for purpose in ('rebate','tax','return'):
@@ -268,3 +269,33 @@ class TestCreditSettlement(SupplierSubmissionCase):
         valid.action_verify()
         self.assertEqual(valid.available_source,0)
         self.assertEqual(valid.effective_value,50)
+
+
+class TestOptionalCreditDebitNote(CreditSettlementCase):
+
+    def test_native_debit_note_reduces_credit_capacity(self):
+        if 'account.debit.note' not in self.env:
+            self.skipTest('Community account_debit_note addon is optional.')
+        claim,_=self._approved()
+        credit=self._credit(claim,8)
+        row=self._review(self._proposal(claim,credit,80))
+        row.action_verify()
+        wizard=self.env['account.debit.note'].with_context(active_model='account.move',active_ids=credit.ids).create({
+            'date':credit.date,'reason':'Disposable native debit correction','move_ids':[Command.set(credit.ids)]})
+        correction=self.env['account.move'].browse(wizard.create_debit()['res_id'])
+        self.assertEqual(correction.debit_origin_id,credit)
+        source=credit.invoice_line_ids
+        correction.write({'invoice_line_ids':[Command.create({
+            'product_id':source.product_id.id,'product_uom_id':source.product_uom_id.id,
+            'purchase_line_id':source.purchase_line_id.id,'quantity':3,'price_unit':source.price_unit,
+            'account_id':source.account_id.id,'tax_ids':[Command.set(source.tax_ids.ids)],
+        })]})
+        correction.action_post()
+        self.assertEqual(row.source_status,'partial')
+        self.assertEqual(row.effective_value,0)
+        row.reason='The independently issued debit note corrected three units of the vendor credit.'
+        row.action_reverse()
+        self.assertEqual(row.reversal_ids,correction)
+        retained=self._review(self._proposal(claim,credit,50))
+        retained.action_verify()
+        self.assertEqual(retained.effective_value,50)

@@ -15,6 +15,23 @@ PURPOSE = [('shortage','Shortage resolution'),('price','Price adjustment'),('ret
            ('quality','Quality adjustment'),('tax','Tax only'),('rebate','Rebate or discount'),('review','Requires review')]
 
 
+def check_credit_identity(line, credit):
+    if not line or not credit:
+        raise ValidationError('Select an existing claim line and vendor credit line.')
+    line.check_access('read')
+    credit.check_access('read')
+    move=credit.move_id
+    (move | move.reversed_entry_id).check_access('read')
+    if (move.move_type!='in_refund' or move.company_id!=line.company_id or credit.display_type!='product'
+            or move.commercial_partner_id!=line.claim_id.partner_id.commercial_partner_id):
+        raise ValidationError('Select a vendor credit product line for this supplier and company.')
+    if credit.purchase_line_id and credit.purchase_line_id!=line.purchase_line_id:
+        raise ValidationError('The credit belongs to another purchase line.')
+    if credit.product_id and credit.product_id!=line.product_id:
+        raise ValidationError('The credit product differs from the claim product.')
+    return move
+
+
 def credit_hold(line):
     line.env[MODEL].flush_model(['state','claim_line_id','claim_value','claim_quantity','currency_id'])
     line.env.cr.execute("""
@@ -181,18 +198,8 @@ class CreditAllocation(models.Model):
     def _match(self):
         self.ensure_one()
         self.check_access('read')
-        line, credit, move = self.claim_line_id,self.credit_line_id,self.credit_move_id
-        if not credit or not move:
-            raise ValidationError('Select an existing vendor credit line.')
-        (move | move.reversed_entry_id).check_access('read')
-        credit.check_access('read')
-        if (move.move_type!='in_refund' or move.company_id!=line.company_id or credit.display_type!='product'
-                or move.commercial_partner_id!=self.supplier_id.commercial_partner_id):
-            raise ValidationError('Select a vendor credit product line for this supplier and company.')
-        if credit.purchase_line_id and credit.purchase_line_id!=line.purchase_line_id:
-            raise ValidationError('The credit belongs to another purchase line.')
-        if credit.product_id and credit.product_id!=line.product_id:
-            raise ValidationError('The credit product differs from the claim product.')
+        line,credit=self.claim_line_id,self.credit_line_id
+        check_credit_identity(line,credit)
         if (len((self.note or '').strip())<20 or not math.isfinite(self.source_amount) or self.source_amount<=0
                 or not math.isfinite(self.source_quantity) or self.source_quantity<0):
             raise ValidationError('Document the match and enter a positive untaxed credit amount.')
@@ -738,22 +745,25 @@ class CreditMatching(models.TransientModel):
             wizard.available_source=wizard.source_tax_total=0
             try:
                 line,source=wizard.claim_line_id,wizard.credit_line_id
-                line.check_access('read')
-                source.check_access('read')
-                move=source.move_id
-                move.check_access('read')
-                if (not line or not source or move.move_type!='in_refund'
-                        or move.company_id!=line.company_id
-                        or move.commercial_partner_id!=wizard.supplier_commercial_id
-                        or source.display_type!='product'
-                        or (source.purchase_line_id and source.purchase_line_id!=line.purchase_line_id)
-                        or (source.product_id and source.product_id!=line.product_id)):
-                    continue
+                check_credit_identity(line,source)
                 projection=model.new({'claim_line_id':line.id,'credit_line_id':source.id})
                 wizard.available_source=projection.available_source
                 wizard.source_tax_total=source.price_total-source.price_subtotal
-            except AccessError:
+            except (AccessError,ValidationError):
                 continue
+
+    @api.model_create_multi
+    def create(self, values):
+        rows=super().create(values)
+        for wizard in rows:
+            check_credit_identity(wizard.claim_line_id,wizard.credit_line_id)
+        return rows
+
+    def write(self, values):
+        result=super().write(values)
+        for wizard in self:
+            check_credit_identity(wizard.claim_line_id,wizard.credit_line_id)
+        return result
 
     def action_propose(self):
         self.ensure_one()
