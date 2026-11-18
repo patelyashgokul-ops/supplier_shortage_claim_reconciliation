@@ -32,6 +32,65 @@ def check_credit_identity(line, credit):
     return move
 
 
+def approved_basis(line):
+    claim=line.claim_id
+    cycle=claim.approval_cycle_ids.filtered(lambda rec:rec.state=='approved' and rec.number==claim.approval_cycle)[:1]
+    basis=(cycle.snapshot or {}).get('basis',{}).get('financial_lines',[]) if cycle else []
+    row=next((item for item in basis if item['line_id']==line.id),{})
+    if (not row or claim.state!='under_review' or claim.approval_status not in ('approved','stale')
+            or claim.replacement_conflict_cycle==cycle.number or claim.purchase_source_status!='current'
+            or row['currency_id']!=claim.currency_id.id or row['purchase_line_id']!=line.purchase_line_id.id):
+        raise ValidationError('Reconcile the underlying source and obtain a current claim approval.')
+    if claim.approval_status=='stale':
+        invalidations=claim.audit_event_ids.filtered(lambda event:event.event_type=='approval_event'
+            and event.event_datetime>=cycle.create_date
+            and 'invalidated current internal authorization' in event.change_summary)
+        if not invalidations or any((event.valuation_basis or {}).get('source_kind') not in ('receiving','credit')
+                                    for event in invalidations):
+            raise ValidationError('The stale approval requires financial reapproval.')
+    original=line.env['account.move.line'].browse(row['bill_line_id'])
+    original.check_access('read')
+    original.move_id.check_access('read')
+    approved_uom=line.env['uom.uom'].browse(row['uom_id'])
+    if (original.move_id.state!='posted' or original.move_id.move_type!='in_invoice'
+            or original.purchase_line_id!=line.purchase_line_id or original.currency_id!=cycle.currency_id
+            or original.quantity!=row['invoice_quantity'] or original.price_subtotal!=row['invoice_untaxed_subtotal']
+            or original.product_id!=line.product_id or original.price_unit!=row['price_unit']
+            or original.discount!=row['discount'] or set(original.tax_ids.ids)!=set(row['tax_ids'])
+            or original.product_uom_id.id!=row['bill_uom_id'] or original.product_uom_id.factor!=row['bill_uom_factor']
+            or original.move_id.commercial_partner_id!=claim.partner_id.commercial_partner_id
+            or approved_uom!=line.purchase_line_id.uom_id or approved_uom.factor!=row['uom_factor']
+            or approved_uom.compare(row['quantity'],line.allocated_qty)):
+        raise ValidationError('The approved original bill or quantity basis has changed.')
+
+    if line.env['supplier.shortage.claim.dispute'].search_count([
+            ('claim_id','=',claim.id),('claim_line_id','in',[False,line.id]),
+            ('dispute_state','not in',('closed','resolved'))],limit=1):
+        raise ValidationError('Resolve the open dispute before allocating credit.')
+    return cycle,row,original.move_id
+
+
+def dated_fx(env, source, target, company, date):
+    detail=[]
+    if source!=target:
+        rates=(source | target)._get_rates(company,date)
+        for currency in source | target:
+            if currency==company.currency_id:
+                continue
+            rate,rate_date=rates[currency.id]
+            record=env['res.currency.rate'].search([
+                ('currency_id','=',currency.id),('name','=',rate_date),
+                ('company_id','in',[False,company.root_id.id])],order='company_id.id,name desc',limit=1)
+            if (not record or not rate_date or rate_date>date or not math.isfinite(rate)
+                    or rate<=0 or not math.isclose(record.rate,rate,rel_tol=1e-12)):
+                raise ValidationError('A documented historical FX rate is required on or before the credit accounting date.')
+            detail.append({'id':record.id,'date':str(rate_date),'rate':rate,'currency':currency.id})
+    rate=source._get_conversion_rate(source,target,company,date)
+    if not math.isfinite(rate) or rate<=0:
+        raise ValidationError('Invalid currency conversion rate.')
+    return {'rate':rate,'date':str(date),'source':source.id,'target':target.id,'rates':detail}
+
+
 def credit_hold(line):
     line.env[MODEL].flush_model(['state','claim_line_id','claim_value','claim_quantity','currency_id'])
     line.env.cr.execute("""
@@ -39,7 +98,10 @@ def credit_hold(line):
                coalesce(bool_or(currency_id != %s),false)
         FROM supplier_shortage_credit_allocation WHERE claim_line_id=%s AND state='verified'
     """, [line.currency_id.id,line.id])
-    return line.env.cr.fetchone()
+    credit,quantity,conflict=line.env.cr.fetchone()
+    from .cash_settlement import cash_hold
+    cash,cash_conflict=cash_hold(line)
+    return credit+cash,quantity,conflict or cash_conflict
 
 
 def version_credit(env, ids):
@@ -263,36 +325,8 @@ class CreditAllocation(models.Model):
             self.credit_move_id.amount_untaxed-sum(reversals.mapped('amount_untaxed')))
 
     def _approval(self):
-        claim,line=self.claim_id,self.claim_line_id
-        cycle=claim.approval_cycle_ids.filtered(lambda rec:rec.state=='approved' and rec.number==claim.approval_cycle)[:1]
-        basis=(cycle.snapshot or {}).get('basis',{}).get('financial_lines',[]) if cycle else []
-        row=next((item for item in basis if item['line_id']==line.id),{})
-        if (not row or claim.state!='under_review' or claim.approval_status not in ('approved','stale')
-                or claim.replacement_conflict_cycle==cycle.number or claim.purchase_source_status!='current'
-                or row['currency_id']!=claim.currency_id.id or row['purchase_line_id']!=line.purchase_line_id.id):
-            raise ValidationError('Reconcile the underlying source and obtain a current claim approval.')
-        if claim.approval_status=='stale':
-            invalidations=claim.audit_event_ids.filtered(lambda event:event.event_type=='approval_event'
-                and event.event_datetime>=cycle.create_date
-                and 'invalidated current internal authorization' in event.change_summary)
-            if not invalidations or any((event.valuation_basis or {}).get('source_kind') not in ('receiving','credit')
-                                        for event in invalidations):
-                raise ValidationError('The stale approval requires financial reapproval.')
-        original=self.env['account.move.line'].browse(row['bill_line_id'])
-        original.check_access('read')
-        original.move_id.check_access('read')
-        approved_uom=self.env['uom.uom'].browse(row['uom_id'])
-        if (original.move_id.state!='posted' or original.move_id.move_type!='in_invoice'
-                or original.purchase_line_id!=line.purchase_line_id or original.currency_id!=cycle.currency_id
-                or original.quantity!=row['invoice_quantity'] or original.price_subtotal!=row['invoice_untaxed_subtotal']
-                or original.product_id!=line.product_id or original.price_unit!=row['price_unit']
-                or original.discount!=row['discount'] or set(original.tax_ids.ids)!=set(row['tax_ids'])
-                or original.product_uom_id.id!=row['bill_uom_id'] or original.product_uom_id.factor!=row['bill_uom_factor']
-                or original.move_id.commercial_partner_id!=self.supplier_id.commercial_partner_id
-                or approved_uom!=line.purchase_line_id.uom_id or approved_uom.factor!=row['uom_factor']
-                or approved_uom.compare(row['quantity'],line.allocated_qty)):
-            raise ValidationError('The approved original bill or quantity basis has changed.')
-        if self.credit_move_id.reversed_entry_id and self.credit_move_id.reversed_entry_id!=original.move_id:
+        cycle,row,bill=approved_basis(self.claim_line_id)
+        if self.credit_move_id.reversed_entry_id and self.credit_move_id.reversed_entry_id!=bill:
             raise ValidationError('The credit reverses a different original accounting document.')
         if self.purpose!='shortage':
             raise ValidationError('Only a documented shortage-resolution credit is eligible.')
@@ -301,32 +335,10 @@ class CreditAllocation(models.Model):
             if (not evidence or evidence.effective_state!='verified'
                     or evidence.evidence_type not in ('supplier','supplier_confirmation','supplier_response','credit','account_note')):
                 raise ValidationError('Manual attribution requires independently verified evidence for this credit and claim line.')
-        if self.env['supplier.shortage.claim.dispute'].search_count([
-                ('claim_id','=',claim.id),('claim_line_id','in',[False,line.id]),
-                ('dispute_state','not in',('closed','resolved'))],limit=1):
-            raise ValidationError('Resolve the open dispute before allocating credit.')
-        return cycle,row,original.move_id
+        return cycle,row,bill
 
     def _fx(self,target):
-        source,company,date=self.source_currency_id,self.company_id,self.credit_move_id.date
-        detail=[]
-        if source!=target:
-            rates=(source | target)._get_rates(company,date)
-            for currency in source | target:
-                if currency==company.currency_id:
-                    continue
-                rate,rate_date=rates[currency.id]
-                record=self.env['res.currency.rate'].search([
-                    ('currency_id','=',currency.id),('name','=',rate_date),
-                    ('company_id','in',[False,company.root_id.id])],order='company_id.id,name desc',limit=1)
-                if (not record or not rate_date or rate_date>date or not math.isfinite(rate)
-                        or rate<=0 or not math.isclose(record.rate,rate,rel_tol=1e-12)):
-                    raise ValidationError('A documented historical FX rate is required on or before the credit accounting date.')
-                detail.append({'id':record.id,'date':str(rate_date),'rate':rate,'currency':currency.id})
-        rate=source._get_conversion_rate(source,target,company,date)
-        if not math.isfinite(rate) or rate<=0:
-            raise ValidationError('Invalid currency conversion rate.')
-        return {'rate':rate,'date':str(date),'source':source.id,'target':target.id,'rates':detail}
+        return dated_fx(self.env,self.source_currency_id,target,self.company_id,self.credit_move_id.date)
 
     def _valuation(self):
         self._match()
