@@ -54,13 +54,12 @@ def invalidate_lines(env, line_ids, reason, kind='all'):
         env['supplier.shortage.claim.line'].invalidate_model(['readiness_status','readiness_message'],flush=False)
         env['supplier.shortage.claim'].invalidate_model(['readiness_dirty','readiness_status','readiness_message','audit_event_ids','readiness_checklist','missing_evidence_count'],flush=False)
     if env.registry.ready or getattr(env.registry,'_ssc_approval_schema_ready',False):
-        invalidate_approvals(env, line_ids, reason)
+        invalidate_approvals(env, line_ids, reason, kind=kind)
 
 
-def invalidate_approvals(env, line_ids, reason):
+def invalidate_approvals(env, line_ids, reason, *, kind=None):
     """Identity-only notification sharing the native source transaction/row locks."""
-    if (env.registry.ready and 'Material receiving source changed' not in reason
-            and 'Material candidate source changed' not in reason):
+    if env.registry.ready and kind not in ('receiving', 'candidate'):
         env['supplier.shortage.claim'].flush_model(['approval_cycle', 'replacement_conflict_cycle'])
         env.cr.execute('''
             UPDATE supplier_shortage_claim c SET replacement_conflict_cycle = c.approval_cycle
@@ -78,10 +77,11 @@ def invalidate_approvals(env, line_ids, reason):
           AND EXISTS (SELECT 1 FROM supplier_shortage_claim_line l WHERE l.id IN %s AND l.claim_id=c.id)
         RETURNING c.id,c.company_id)
         INSERT INTO supplier_shortage_claim_audit
-        (claim_id,company_id,event_type,actor_id,event_datetime,change_summary,reason)
+        (claim_id,company_id,event_type,actor_id,event_datetime,change_summary,reason,valuation_basis)
         SELECT id,company_id,'approval_event',%s,statement_timestamp() AT TIME ZONE 'UTC',
-        'Material source change invalidated current internal authorization; historical decisions retained.',%s FROM changed''',
-        [tuple(line_ids),env.uid,reason])
+        'Material source change invalidated current internal authorization; historical decisions retained.',%s,
+        json_build_object('source_kind', %s::text) FROM changed''',
+        [tuple(line_ids),env.uid,reason,kind])
     env['supplier.shortage.claim'].invalidate_model(['approval_status','audit_event_ids'],flush=False)
     env['supplier.shortage.claim.approval'].invalidate_model(['claim_approval_status','can_decide'],flush=False)
 
@@ -133,11 +133,33 @@ def replacement_stock_changed(env, moves, before=()):
         return
     moves.flush_recordset(['state', 'origin_returned_move_id', 'location_id', 'location_dest_id'])
     ids = set(before)
+    return_parents = set()
     for move in moves.filtered(lambda m: m.state == 'done'):
         if move.location_id.usage == 'supplier' and move.location_dest_id.usage == 'internal':
             ids.add(move.id)
         elif move.location_dest_id.usage == 'supplier' and move.origin_returned_move_id:
-            ids.add(move.origin_returned_move_id.id)
+            return_parents.add(move.origin_returned_move_id.id)
+    if return_parents:
+        # Descendant warehouse legs can carry native return provenance. Flag their
+        # boundary receipts without attributing an ambiguously merged return.
+        env.cr.execute('''
+            WITH RECURSIVE ancestry(id) AS (
+                SELECT unnest(%s::integer[])
+                UNION
+                SELECT rel.move_orig_id FROM ancestry a
+                JOIN stock_move_move_rel rel ON rel.move_dest_id = a.id
+                JOIN stock_move m ON m.id = a.id
+                JOIN stock_location src ON src.id = m.location_id
+                JOIN stock_location dst ON dst.id = m.location_dest_id
+                WHERE src.usage IN ('internal', 'transit') AND dst.usage IN ('internal', 'transit')
+            )
+            SELECT m.id FROM ancestry a
+            JOIN stock_move m ON m.id = a.id
+            JOIN stock_location src ON src.id = m.location_id
+            JOIN stock_location dst ON dst.id = m.location_dest_id
+            WHERE src.usage = 'supplier' AND dst.usage = 'internal'
+        ''', [sorted(return_parents)])
+        ids.update(row[0] for row in env.cr.fetchall())
     mark_replacements(env, move_ids=ids, reason='Completed receipt evidence or linked supplier return changed.')
 
 

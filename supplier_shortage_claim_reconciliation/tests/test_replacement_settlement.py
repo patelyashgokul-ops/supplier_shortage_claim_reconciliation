@@ -18,8 +18,12 @@ class TestReplacementSettlement(SupplierSubmissionCase):
             groups=M + 'group_claim_user,purchase.group_purchase_user,stock.group_stock_manager,account.group_account_readonly',
             company_id=cls.company.id, company_ids=[Command.set(cls.company.ids)])
         cls.warehouse = independent_checker(cls.env, cls.company)
+        cls.physical_reviewer = new_test_user(
+            cls.env, login='ssc_replacement_physical_reviewer',
+            groups=M + 'group_warehouse_reviewer,purchase.group_purchase_user,stock.group_stock_manager,account.group_account_readonly',
+            company_id=cls.company.id, company_ids=[Command.set(cls.company.ids)])
 
-    def _promised(self, quantity=12, **approval):
+    def _promised(self, promised_quantity=12, **approval):
         claim, _, sub, _ = self._queued(**approval)
         self.assertEqual(self._send_mocked(sub), 1)
         line = claim.claim_line_ids
@@ -28,7 +32,7 @@ class TestReplacementSettlement(SupplierSubmissionCase):
             'response_type': 'acceptance', 'response_source': 'phone',
             'response_reference': 'Replacement agreement recorded after supplier callback',
             'response_summary': 'Supplier agreed to send goods against this shortage claim.',
-            'line_ids': [Command.create({'claim_line_id': line.id, 'accepted_qty': quantity})],
+            'line_ids': [Command.create({'claim_line_id': line.id, 'accepted_qty': promised_quantity})],
         })
         reviewer = response.with_user(self.sender)
         reviewer.verification_note = 'Checked supplier identity, exact claim revision and replacement commitment.'
@@ -36,7 +40,7 @@ class TestReplacementSettlement(SupplierSubmissionCase):
         promise = self.env['supplier.shortage.claim.commitment'].with_user(self.sender).create({
             'submission_id': sub.id, 'response_id': response.id, 'commitment_type': 'replacement',
             'claim_line_id': line.id, 'product_uom_id': line.purchase_line_id.uom_id.id,
-            'committed_qty': quantity, 'currency_id': sub.currency_id.id, 'promised_date': fields.Date.today(),
+            'committed_qty': promised_quantity, 'currency_id': sub.currency_id.id, 'promised_date': fields.Date.today(),
             'description': 'Supplier promised to replace units under the verified claim-specific agreement.',
         })
         return claim, promise
@@ -50,7 +54,7 @@ class TestReplacementSettlement(SupplierSubmissionCase):
 
     def _review(self, row):
         row.action_request_verification()
-        row.with_user(self.warehouse).action_warehouse_verify()
+        row.with_user(self.physical_reviewer).action_warehouse_verify()
 
     def test_partial_receipts_and_frozen_currency_value(self):
         claim, promise = self._promised()

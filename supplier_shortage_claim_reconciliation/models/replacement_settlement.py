@@ -221,6 +221,19 @@ class Replacement(models.Model):
                 raise ValidationError('Allocate exactly one unit for the selected serial.')
         elif tracked:
             raise ValidationError('Tracked receipt lines are only used for tracked products.')
+        downstream, frontier = move, move
+        while frontier:
+            linked = frontier.move_dest_ids - downstream
+            linked.check_access('read')
+            frontier = linked.filtered(lambda leg: leg.state == 'done'
+                and leg.company_id == move.company_id and leg.product_id == move.product_id
+                and leg.location_id.usage in ('internal', 'transit')
+                and leg.location_dest_id.usage in ('internal', 'transit'))
+            downstream |= frontier
+        indirect = (downstream - move).returned_move_ids
+        indirect.check_access('read')
+        if any(ret.state == 'done' and ret.location_dest_id.usage == 'supplier' for ret in indirect):
+            raise ValidationError('An indirect supplier return requires warehouse provenance reconciliation.')
         children = move.returned_move_ids
         children.check_access('read')
         returns = children.filtered(lambda ret: ret.state == 'done' and
@@ -298,7 +311,7 @@ class Replacement(models.Model):
         if status == 'stale':
             events = claim.audit_event_ids.filtered(lambda ev: ev.event_type == 'approval_event'
                 and ev.event_datetime >= cycle.create_date and 'invalidated current internal authorization' in ev.change_summary)
-            if not events or any('Material receiving source changed' not in (ev.reason or '') for ev in events):
+            if not events or any((ev.valuation_basis or {}).get('source_kind') != 'receiving' for ev in events):
                 raise ValidationError('The approval has a material conflict requiring fresh approval.')
         if (self.stock_move_id.date < cycle.create_date
                 or self.stock_move_id.id in (line.allocation_basis or {}).get('source_move_ids', [])):
@@ -446,7 +459,7 @@ class Replacement(models.Model):
         if self.state == 'reversed':
             return
         if self.state != 'verified' or self.env.user == self.create_uid or len((self.decision_reason or '').strip()) < 20:
-            raise ValidationError('Reversal requires a verified allocation and an independent reviewerÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢s documented reason.')
+            raise ValidationError('Reversal requires a verified allocation and an independent reviewerÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢s documented reason.')
         self.env.cr.execute('UPDATE supplier_shortage_claim SET write_date = write_date WHERE id = %s', [self.claim_id.id])
         self._transition({'state': 'reversed', 'active_move_id': False, 'reversed_at': fields.Datetime.now()},
                          'Recovery reversed')
