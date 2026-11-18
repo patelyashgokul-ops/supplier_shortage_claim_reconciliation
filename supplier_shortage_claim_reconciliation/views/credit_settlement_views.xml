@@ -1,4 +1,4 @@
-ï»¿<odoo>
+<odoo>
     <record id="view_credit_search" model="ir.ui.view">
         <field name="name">supplier.shortage.credit.search</field>
         <field name="model">supplier.shortage.credit.allocation</field>

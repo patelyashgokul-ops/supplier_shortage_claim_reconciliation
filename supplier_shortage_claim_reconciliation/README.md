@@ -1346,3 +1346,56 @@ Use the existing disposable database and low-token runner from the module folder
 & ../../.venv/Scripts/python.exe .testing/run.py --mode update --level regression --tags '/supplier_shortage_claim_reconciliation:TestReceiptIntegration,/supplier_shortage_claim_reconciliation:TestReceivingExceptions,/supplier_shortage_claim_reconciliation:TestClaimPreparation,/supplier_shortage_claim_reconciliation:TestClaimApproval,/supplier_shortage_claim_reconciliation:TestSupplierResponse,/supplier_shortage_claim_reconciliation:TestClaimValuation,/supplier_shortage_claim_reconciliation:TestSecurity,/supplier_shortage_claim_reconciliation:TestClaimHardening'
 & ../../.venv/Scripts/python.exe .testing/check_step15_concurrency.py
 ```
+
+## STEP 16 — Vendor credit settlement
+
+Open **Supplier Recovery → Settlements → Vendor Credit Notes** to review existing
+Odoo vendor credit lines. **Credit Matching** creates a draft allocation. The
+maker submits it, an independent Accounts reviewer checks purpose, provenance,
+tax and FX, and a separate Finance manager authorizes recovery. Both reviewers
+need native access to the accounting records and evidence. Company, supplier,
+product, purchase line, approved cycle and original bill are checked server-side.
+An unlinked credit line requires independently verified claim-specific evidence.
+
+A supplier promise is a commitment. A posted Vendor Credit Note is an accounting
+source. Claim recovery starts with an independently verified allocation of a
+posted, attributable credit. A claim may use several credit notes, and different
+claims may share one credit line within its unreversed untaxed capacity. One
+active match per credit line and claim line prevents duplicates. Quantity-based
+credits must tie to the source and the approved unit value. Value-only credits
+resolve money and carry zero resolution quantity.
+
+The frozen approved untaxed claim value caps goods and credit together. Source
+capacity and claim capacity are locked transactionally with the Step 15 goods
+workflow. The claim financial summary shows approved, goods, verified credit,
+reversed and unresolved value. It flags incomplete visibility and allocations
+requiring review. Local-currency allocations use authoritative posted subtotals.
+Tax is shown separately from recovery over the native line subtotal and total.
+Currency, company carrying value, accounting date and the documented Odoo FX
+rates are retained with the allocation. The conversion uses the accounting date
+and requires documented historical rates. Tax and company carrying amounts use
+cumulative proportional rounding within each source line.
+
+The workbench reads posted native reversals by accounting relationship. A unique,
+compatible reversal line reduces available untaxed source capacity. For a
+material correction the original allocation is suspended, Finance records a
+reversal, and the retained amount can be proposed again. Ambiguous line mapping,
+reversal chains and unsupported tax or FX treatment require financial review.
+The original allocation, approval, source, actor, amounts and reversal history
+remain in the claim audit.
+
+Realization describes what happened to the credit itself. Native payable
+reconciliation may establish a bill offset. Bank realization requires supporting
+bank statement evidence. Unclear matches remain under review, including a zero
+residual without identifiable counterpart evidence. A later refund of the same
+credit realizes the existing balance and contributes no new claim recovery.
+Cash refund allocation and full financial closure are reserved for later steps.
+
+Use the two existing disposable databases and the low-token runner from the
+module folder.
+
+```powershell
+& ../../.venv/Scripts/python.exe .testing/run.py --mode update --level targeted --http-port 8176 --tags '/supplier_shortage_claim_reconciliation:TestCreditSettlement'
+& ../../.venv/Scripts/python.exe .testing/run.py --mode update --level regression --http-port 8177 --database ssc_claim_test_20_step04_fresh_20261102 --tags '/supplier_shortage_claim_reconciliation:TestClaimApproval,/supplier_shortage_claim_reconciliation:TestVendorBillIntegration,/supplier_shortage_claim_reconciliation:TestReplacementSettlement,/supplier_shortage_claim_reconciliation:TestSupplierResponse,/supplier_shortage_claim_reconciliation:TestClaimValuation,/supplier_shortage_claim_reconciliation:TestSecurity,/supplier_shortage_claim_reconciliation:TestClaimPreparation,/supplier_shortage_claim_reconciliation:TestClaimHardening'
+& ../../.venv/Scripts/python.exe .testing/check_step16_concurrency.py
+```
