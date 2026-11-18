@@ -1,0 +1,108 @@
+﻿import base64
+
+from odoo import Command
+from odoo.exceptions import AccessError, ValidationError
+
+from .preparation_fixtures import verify_document
+from .test_credit_settlement import CreditSettlementCase
+
+
+CASH='supplier.shortage.cash.settlement'
+
+
+class TestCashSettlement(CreditSettlementCase):
+
+    def _bank(self,claim,amount,account):
+        company=claim.company_id
+        journal=self.env['account.journal'].search([('company_id','=',company.id),('code','=','S17B')],limit=1)
+        journal=journal or self.env['account.journal'].create({
+            'name':'Disposable refund bank','code':'S17B','type':'bank','company_id':company.id})
+        return self.env['account.bank.statement.line'].create({
+            'payment_ref':'Verified supplier remittance fixture','journal_id':journal.id,
+            'partner_id':claim.partner_id.id,'date':claim.claim_date,'amount':amount,
+            'counterpart_account_id':account.id,
+        })
+
+    def _cash(self,claim,source,amount,kind='direct',bank=None,**extra):
+        return self.env[CASH].with_user(self.maker).create({
+            'claim_line_id':claim.claim_line_ids.id,'source_line_id':source.id,'kind':kind,
+            'bank_id':bank.id if bank else False,'gross_amount':amount,
+            'untaxed_amount':amount if kind=='direct' else 0,
+            'note':'Independently attributed supplier settlement for the specific original claim line.',**extra,
+        })
+
+    def _direct_evidence(self):
+        claim,_,submission,_=self._queued()
+        self.assertEqual(self._send_mocked(submission),1)
+        evidence=self.env['supplier.shortage.claim.evidence'].with_user(self.maker).create({
+            'claim_id':claim.id,'supplier_response_submission_id':submission.id,
+            'scope_line_ids':[Command.set(claim.claim_line_ids.ids)],'evidence_type':'supplier_confirmation',
+            'description':'Supplier confirms standalone shortage refund and its untaxed basis.',
+            'filename':'refund.txt','upload_data':base64.b64encode(b'Supplier identifies the independent refund and claim line.'),
+            'verification_note':'Independently checked exact remittance, attribution and untaxed settlement terms.',
+        })
+        verify_document(evidence)
+        return claim,evidence
+
+    def test_direct_partial_refunds_and_shared_claim_capacity(self):
+        claim,evidence=self._direct_evidence()
+        account=self.accounts[claim.company_id.id]['expense']
+        first=self._bank(claim,70,account)
+        second=self._bank(claim,100,account)
+        a=self._cash(claim,first._seek_for_lines()[2],70,bank=first,evidence_id=evidence.id)
+        self.assertEqual(a.effective_value,0)
+        with self.assertRaises(AccessError), self.env.cr.savepoint():
+            a.write({'state':'verified'})
+        native=first.move_id.line_ids.read(['balance','amount_currency'])
+        documents=self.env['account.move'].search_count([])
+        self._review(a).action_verify()
+        duplicate=self._review(self._cash(claim,first._seek_for_lines()[2],25,bank=first,evidence_id=evidence.id))
+        with self.assertRaises(ValidationError), self.env.cr.savepoint():
+            duplicate.action_verify()
+        over=self._review(self._cash(claim,second._seek_for_lines()[2],90,bank=second,evidence_id=evidence.id))
+        with self.assertRaisesRegex(ValidationError,'approved claim capacity'), self.env.cr.savepoint():
+            over.action_verify()
+        b=self._review(self._cash(claim,second._seek_for_lines()[2],30,bank=second,evidence_id=evidence.id))
+        b.action_verify()
+        self.assertEqual(claim.verified_recovery_amount,100)
+        self.assertEqual(claim.claim_line_ids.settlement_unresolved_value,50)
+        self.assertEqual(first.move_id.line_ids.read(['balance','amount_currency']),native)
+        self.assertEqual(self.env['account.move'].search_count([]),documents)
+
+    def test_bank_and_payable_realization_are_not_additional_recovery(self):
+        claim,_=self._approved()
+        payable=self.accounts[claim.company_id.id]['payable']
+        credit_doc=self._credit(claim,10)
+        credit=self._review(self._proposal(claim,credit_doc,100))
+        credit.action_verify()
+        statement=self._bank(claim,60,payable)
+        bank_payable=statement._seek_for_lines()[2]
+        credit_payable=credit_doc.line_ids.filtered(lambda item:item.account_id==payable)
+        forged=self._cash(claim,bank_payable,60,bank=statement)
+        forged.action_submit()
+        with self.assertRaises(ValidationError), self.env.cr.savepoint():
+            forged.with_user(self.reviewer).action_accounts()
+        refund=self._cash(claim,bank_payable,60,kind='credit',bank=statement,credit_id=credit.id)
+        refund.action_submit()
+        with self.assertRaisesRegex(ValidationError,'native payable match'), self.env.cr.savepoint():
+            refund.with_user(self.reviewer).action_accounts()
+        (bank_payable | credit_payable).reconcile()
+        refund.with_user(self.reviewer).action_accounts()
+        refund.with_user(self.finance).action_verify()
+        bill_payable=credit.original_bill_id.line_ids.filtered(lambda item:item.account_id==payable)
+        (bill_payable | credit_payable).reconcile()
+        offset=self._review(self._cash(claim,bill_payable,40,kind='offset',credit_id=credit.id))
+        offset.action_verify()
+        line=claim.claim_line_ids
+        self.assertEqual((line.credit_value,line.cash_value,line.cash_realization,line.payable_realization),(100,0,60,40))
+        self.assertEqual(claim.verified_recovery_amount,100)
+        bank_payable.remove_move_reconcile()
+        self.assertEqual(refund.realized_value,0)
+        self.assertEqual(offset.realized_value,40)
+        self.assertEqual(credit.effective_value,100)
+        self.assertEqual(claim.verified_recovery_amount,100)
+        refund=refund.with_user(self.finance)
+        refund.reason='The bank reconciliation was removed, so this realization is withdrawn.'
+        refund.action_reverse()
+        self.assertEqual(refund.realized_snapshot,60)
+        self.assertTrue(refund.audit_ids)
