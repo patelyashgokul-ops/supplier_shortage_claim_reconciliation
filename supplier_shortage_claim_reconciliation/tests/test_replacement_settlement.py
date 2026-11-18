@@ -308,6 +308,7 @@ class TestReplacementSettlement(SupplierSubmissionCase):
         first = receipt_and_proposal()
         first.action_verify()
         returned = first.picking_id._create_return()
+        returned.move_ids.product_uom_qty = 1
         returned.action_assign()
         returned.move_ids.quantity = 1
         returned.move_ids.move_line_ids.lot_id = serial
