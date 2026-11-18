@@ -97,6 +97,7 @@ class TestReplacementSettlement(SupplierSubmissionCase):
         self.assertEqual(claim.claim_line_ids.replacement_remaining_qty, 13)
         self.assertEqual(claim.verified_recovery_amount, stock.currency_id.round(approved * 7 / 20))
         self.assertEqual(claim.verified_amount, approved)
+        self.assertEqual(stock.order_line.qty_received, 90)
         self.assertEqual((move_a.quantity, move_b.quantity), before_moves)
         self.assertEqual(self.env['account.move'].search_count([]), documents)
         self.assertEqual(claim.audit_event_ids.filtered(
@@ -133,6 +134,7 @@ class TestReplacementSettlement(SupplierSubmissionCase):
             duplicate.with_user(self.finance).action_verify()
         self.assertFalse(duplicate.verified_at)
         self.assertEqual(duplicate.effective_qty, 0)
+        self.assertNotIn('In-kind recovery verified', duplicate.audit_ids.mapped('change_summary'))
 
     def test_linked_supplier_return_and_corrected_allocation(self):
         claim, promise = self._promised()
@@ -204,6 +206,10 @@ class TestReplacementSettlement(SupplierSubmissionCase):
         self.assertEqual(row.effective_value, claim.currency_id.round(claim.verified_amount * 3 / 15))
         self.assertEqual(row.source_received_qty, 4)
         self.assertFalse(source.purchase_line_id)
+        self.env['purchase.order.line'].browse(line.purchase_line_id.id).price_unit += 1
+        self.assertTrue(row.source_dirty)
+        self.assertEqual(row.effective_qty, 0)
+        self.assertEqual(row.allocated_qty, 3)
 
 
     def test_one_receipt_split_across_partial_claims(self):
