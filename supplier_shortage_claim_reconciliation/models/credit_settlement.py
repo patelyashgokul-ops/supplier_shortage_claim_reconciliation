@@ -463,6 +463,16 @@ class CreditAllocation(models.Model):
                     if (payment.payment_type!='inbound' or not payment.is_matched
                             or payment.journal_id.type not in ('bank','cash')):
                         return 'unknown'
+                    liquidity,_,_=payment._seek_for_lines()
+                    liquidity.check_access('read')
+                    bank_matches=liquidity.matched_debit_ids | liquidity.matched_credit_ids
+                    bank_matches.check_access('read')
+                    counterparts=(bank_matches.debit_move_id | bank_matches.credit_move_id)-liquidity
+                    counterparts.check_access('read')
+                    statements=counterparts.move_id.statement_line_id
+                    statements.check_access('read')
+                    if not statements or any(stmt.amount<=0 or stmt.company_id!=move.company_id for stmt in statements):
+                        return 'unknown'
                     bank=True
                 else:
                     return 'unknown'
@@ -588,6 +598,18 @@ class CreditClaim(models.Model):
     credit_allocation_ids=fields.One2many(MODEL,'claim_id',readonly=True,copy=False)
     credit_summary_line_ids=fields.One2many('supplier.shortage.claim.line','claim_id',readonly=True,copy=False)
 
+    @api.model_create_multi
+    def create(self, values):
+        outputs={'credit_summary_line_ids','credit_allocation_ids'}
+        if any(outputs & vals.keys() for vals in values) or any('default_'+key in self.env.context for key in outputs):
+            raise AccessError('Open the credit workbench to manage allocations.')
+        return super().create(values)
+
+    def write(self, values):
+        if {'credit_summary_line_ids','credit_allocation_ids'} & values.keys():
+            raise AccessError('Open the credit workbench to manage allocations.')
+        return super().write(values)
+
     @api.depends('replacement_ids.effective_value','supplier_position_currency_id','replacement_conflict_cycle',
                  'credit_allocation_ids.effective_value')
     @api.depends_context('uid','allowed_company_ids')
@@ -623,6 +645,12 @@ class CreditMatching(models.TransientModel):
     source_currency_id=fields.Many2one(related='credit_line_id.currency_id',compute_sudo=False)
     supplier_commercial_id=fields.Many2one(related='supplier_id.commercial_partner_id',compute_sudo=False)
     source_state=fields.Selection(related='credit_line_id.move_id.state',compute_sudo=False)
+    claim_currency_id=fields.Many2one(related='claim_line_id.currency_id',compute_sudo=False)
+    approved_value=fields.Monetary(related='claim_line_id.settlement_approved_value',currency_field='claim_currency_id',compute_sudo=False)
+    goods_value=fields.Monetary(related='claim_line_id.replacement_value',currency_field='claim_currency_id',compute_sudo=False)
+    allocated_credit=fields.Monetary(related='claim_line_id.credit_value',currency_field='claim_currency_id',compute_sudo=False)
+    unresolved_value=fields.Monetary(related='claim_line_id.settlement_unresolved_value',currency_field='claim_currency_id',compute_sudo=False)
+    settlement_review=fields.Boolean(related='claim_line_id.settlement_review',compute_sudo=False)
     source_subtotal=fields.Monetary(related='credit_line_id.price_subtotal',currency_field='source_currency_id',compute_sudo=False)
     source_amount=fields.Monetary(required=True,currency_field='source_currency_id')
     source_quantity=fields.Float(digits='Product Unit')
