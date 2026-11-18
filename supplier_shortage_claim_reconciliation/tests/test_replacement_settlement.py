@@ -1,8 +1,10 @@
-﻿from odoo import Command, fields
+import base64
+
+from odoo import Command, fields
 from odoo.exceptions import AccessError, ValidationError
 from odoo.tests.common import new_test_user
 
-from .preparation_fixtures import additional_receipt, independent_checker
+from .preparation_fixtures import additional_receipt, independent_checker, verify_document
 from .test_supplier_submission import M, SupplierSubmissionCase
 
 
@@ -87,6 +89,9 @@ class TestReplacementSettlement(SupplierSubmissionCase):
         with self.assertRaises(AccessError), self.env.cr.savepoint():
             row.action_verify()
         wrong_move = self._incoming(self._order(10)).move_ids
+        cross_company = self._incoming(self._order(10, warehouse=self.other_wh)).move_ids
+        with self.assertRaises((AccessError, ValidationError)), self.env.cr.savepoint():
+            self._draft(claim, promise, cross_company, 2)
         with self.assertRaises(ValidationError), self.env.cr.savepoint():
             self._draft(claim, promise, wrong_move, 2)
         self._review(row)
@@ -115,7 +120,48 @@ class TestReplacementSettlement(SupplierSubmissionCase):
         self.assertEqual(row.allocated_qty, 6)
         self.assertTrue(row.verified_at)
         corrected = self._draft(claim, promise, picking.move_ids, 4)
+        corrected.supersedes_id = row
         self._review(corrected)
         corrected.with_user(self.finance).action_verify()
         self.assertEqual(claim.claim_line_ids.replacement_qty, 4)
         self.assertEqual(corrected.state, 'verified')
+
+
+    def test_pending_manual_receipt_and_exceptional_substitute(self):
+        claim, promise = self._promised()
+        line = claim.claim_line_ids
+        picking = self.env['stock.picking'].create({
+            'partner_id': self.supplier.id, 'picking_type_id': self.wh.in_type_id.id,
+            'location_id': self.vendor_location.id, 'location_dest_id': self.wh.lot_stock_id.id,
+            'move_ids': [Command.create({'product_id': self.second.id, 'product_uom_qty': 4,
+                'uom_id': self.second.uom_id.id, 'location_id': self.vendor_location.id,
+                'location_dest_id': self.wh.lot_stock_id.id})],
+        })
+        picking.action_confirm()
+        source = picking.move_ids
+        evidence = self.env['supplier.shortage.claim.evidence'].with_user(self.maker).create({
+            'claim_id': claim.id, 'supplier_response_submission_id': promise.submission_id.id,
+            'scope_line_ids': [Command.set(line.ids)], 'evidence_type': 'supplier_confirmation',
+            'description': 'Supplier agreement for four substitute units against three approved units.',
+            'filename': 'substitute.txt', 'upload_data': base64.b64encode(
+                b'Supplier confirms four substitute units cover three original units against the submitted claim.'),
+            'verification_note': 'Reviewed supplier identity, stock reference, exact scope and equivalent quantity.',
+        })
+        verify_document(evidence)
+        row = self.env['supplier.shortage.replacement'].with_user(self.maker).create({
+            'claim_line_id': line.id, 'stock_move_id': source.id, 'source_qty': 4,
+            'substitute_claim_qty': 3, 'evidence_id': evidence.id,
+            'note': 'Verified supplier agreement equates four substitute units to three original units.',
+        })
+        row.action_request_verification()
+        self.assertEqual(row.state, 'receipt')
+        self.assertEqual(row.effective_qty, 0)
+        with self.assertRaises(ValidationError), self.env.cr.savepoint():
+            row.with_user(self.warehouse).action_warehouse_verify()
+        self._validate(picking)
+        row.with_user(self.warehouse).action_warehouse_verify()
+        row.with_user(self.finance).action_verify()
+        self.assertEqual(row.effective_qty, 3)
+        self.assertEqual(row.effective_value, claim.currency_id.round(claim.verified_amount * 3 / 15))
+        self.assertEqual(row.source_received_qty, 4)
+        self.assertFalse(source.purchase_line_id)

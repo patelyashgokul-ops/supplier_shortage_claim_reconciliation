@@ -61,6 +61,8 @@
                             groups="supplier_shortage_claim_reconciliation.group_finance_manager"/>
                     <button name="action_reverse" type="object" string="Reverse Recovery" invisible="state != 'verified'"
                             groups="supplier_shortage_claim_reconciliation.group_finance_manager"/>
+                    <button name="action_prepare_correction" type="object" string="Propose Correction"
+                            invisible="state != 'reversed'" groups="supplier_shortage_claim_reconciliation.group_claim_user"/>
                     <field name="state" widget="statusbar" statusbar_visible="draft,receipt,review,finance,verified"/>
                 </header>
                 <sheet>
@@ -88,13 +90,14 @@
                             <field name="product_id"/>
                             <field name="stock_move_line_id" readonly="state != 'draft'"
                                    domain="[('move_id','=',stock_move_id)]" options="{'no_create': True}"/>
-                            <field name="source_received_qty" invisible="not approval_id"/>
+                            <field name="source_received_qty" invisible="not warehouse_at"/>
                             <field name="source_qty" readonly="state != 'draft'"/>
                             <field name="source_uom_id"/>
                             <field name="substitute_claim_qty" readonly="state != 'draft'"/>
                         </group>
                     </group>
                     <group>
+                        <field name="supersedes_id" readonly="state != 'draft'" invisible="not supersedes_id"/>
                         <field name="note" readonly="state != 'draft'"/>
                         <field name="decision_reason" readonly="state in ('rejected','reversed')"/>
                     </group>
@@ -171,6 +174,8 @@
                             <field name="stock_move_id"/>
                             <field name="commitment_id" groups="supplier_shortage_claim_reconciliation.group_claim_user,supplier_shortage_claim_reconciliation.group_accounts_reviewer"/>
                             <field name="warehouse_by"/>
+                            <field name="source_received_qty"/>
+                            <field name="source_uom_id"/>
                             <field name="effective_qty"/>
                             <field name="state" widget="badge"/>
                             <field name="source_dirty"/>

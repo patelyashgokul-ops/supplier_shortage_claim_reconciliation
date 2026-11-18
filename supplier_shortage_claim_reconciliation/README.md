@@ -1295,3 +1295,54 @@ workflow. Browser visual/responsive review remains NOT VERIFIED (native views an
 Business-day deadline calculation, automatic reminders, FX offer normalization, settlement execution
 and the executive recovery dashboard remain outside this step. No credit note, refund, replacement
 shipment, payment, accounting entry or recovery allocation is generated. STEP 15 has not been started.
+
+## STEP 15 — Replacement goods reconciliation
+
+Open **Supplier Recovery → Settlements → Replacement Goods** or the claim's
+**Replacement Goods** tab. The workbench links the claim line, reviewed stock
+move, warehouse, supplier promise, evidence, and settlement audit. Claim line
+quantities use the approved purchase UoM. The receipt detail shows the physical
+source UoM. Recovery projections use the allocations visible to the employee
+through native access rules.
+
+A supplier promise, dispatch message, pending receipt, and completed receipt
+are distinct from verified recovery. The maker links a shipment explicitly to
+the shortage and documents the supplier's terms. An independent warehouse
+reviewer confirms the completed supplier-to-company receipt and a separate
+finance manager authorizes the application against the claim. Both need native
+access to their source records. A linked promise can remain partly outstanding
+after recovery. Multiple overlapping promises are left for review.
+
+A direct match requires the original purchase line. A dedicated unlinked
+receipt requires verified supplier evidence scoped to the claim line. A receipt
+on an unrelated purchase order requires separate source reconciliation.
+Substitutes additionally require the documented original-product equivalent
+quantity and independent finance authorization. The approved untaxed line
+amount and quantity determine the settlement value in the frozen claim
+currency. Goods recovery is an in-kind claim position. Credit notes, cash
+refunds, payments, and financial settlement posting are deferred to later steps.
+
+The source and claim each have a separate capacity limit. One claim can use
+multiple receipts, and compatible claims can split a receipt subject to its
+shared physical balance. The claim's original approval remains traceable.
+Native receipt movements may also affect the live purchase position and
+shortage candidate. The settlement balance is calculated against the original
+approval and deducts each authorized allocation once.
+
+Material receipt corrections and completed directly linked supplier returns
+suspend affected recovery and reserve its capacity pending review. Finance can
+reverse the original entry with a reason. Purchase can propose a linked
+correction for the retained quantity, which goes through warehouse and finance
+review again. This retains the initial quantity, valuation, review actors,
+timestamps, fingerprint, and correction history. Indirect return chains
+require manual reconciliation. Tracked allocations select one native receipt
+line per claim and movement. The workbench restricts visibility through company,
+claim line, warehouse source, stock movement, and evidence access.
+
+Use the existing disposable database and low-token runner from the module folder.
+
+```powershell
+& ../../.venv/Scripts/python.exe .testing/run.py --mode update --level targeted --tags '/supplier_shortage_claim_reconciliation:TestReplacementSettlement'
+& ../../.venv/Scripts/python.exe .testing/run.py --mode update --level regression --tags '/supplier_shortage_claim_reconciliation:TestReceiptIntegration,/supplier_shortage_claim_reconciliation:TestReceivingExceptions,/supplier_shortage_claim_reconciliation:TestClaimPreparation,/supplier_shortage_claim_reconciliation:TestClaimApproval,/supplier_shortage_claim_reconciliation:TestSupplierResponse,/supplier_shortage_claim_reconciliation:TestClaimValuation,/supplier_shortage_claim_reconciliation:TestSecurity,/supplier_shortage_claim_reconciliation:TestClaimHardening'
+& ../../.venv/Scripts/python.exe .testing/check_step15_concurrency.py
+```

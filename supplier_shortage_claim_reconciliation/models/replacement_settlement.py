@@ -1,4 +1,4 @@
-﻿import hashlib
+import hashlib
 import json
 import math
 
@@ -11,7 +11,7 @@ from .claim_preparation import ROLE, lock_records
 
 MODEL = 'supplier.shortage.replacement'
 INPUTS = {'claim_line_id', 'stock_move_id', 'stock_move_line_id', 'commitment_id',
-          'evidence_id', 'source_qty', 'substitute_claim_qty', 'note', 'decision_reason'}
+          'evidence_id', 'source_qty', 'substitute_claim_qty', 'note', 'decision_reason', 'supersedes_id'}
 STATES = [('draft', 'Draft'), ('receipt', 'Pending Receipt'), ('review', 'Pending Warehouse Review'),
           ('finance', 'Pending Finance Review'), ('verified', 'Verified'), ('rejected', 'Rejected'),
           ('reversed', 'Reversed')]
@@ -49,6 +49,8 @@ class Replacement(models.Model):
     commitment_id = fields.Many2one('supplier.shortage.claim.commitment', ondelete='restrict', check_company=True)
     evidence_id = fields.Many2one('supplier.shortage.claim.evidence', string='Supplier Settlement Evidence',
                                   ondelete='restrict', check_company=True)
+    supersedes_id = fields.Many2one(MODEL, string='Corrects Reversed Allocation',
+                                    ondelete='restrict', check_company=True)
     source_qty = fields.Float(required=True, digits='Product Unit', aggregator=False)
     substitute_claim_qty = fields.Float(digits='Product Unit', aggregator=False,
         help='Explicit approved original-product equivalent for this source quantity.')
@@ -155,6 +157,16 @@ class Replacement(models.Model):
             raise ValidationError('The receipt supplier must match the claim supplier.')
         if move.purchase_line_id and move.purchase_line_id != line.purchase_line_id:
             raise ValidationError('This movement belongs to a different purchase line.')
+        parents = move.move_orig_ids | move.origin_returned_move_id
+        parents.check_access('read')
+        related_po_lines = parents.purchase_line_id | move.picking_id.move_ids.purchase_line_id
+        if not move.purchase_line_id and any(po != line.purchase_line_id for po in related_po_lines):
+            raise ValidationError('An unlinked movement on an unrelated purchase picking requires source reconciliation.')
+        if self.supersedes_id:
+            self.supersedes_id.check_access('read')
+            if (self.supersedes_id.state != 'reversed' or self.supersedes_id.claim_line_id != line
+                    or self.supersedes_id.stock_move_id != move):
+                raise ValidationError('The correction must refer to a reversed allocation for this line and receipt.')
         if not line.purchase_line_id or not math.isfinite(self.source_qty) or self.source_qty <= 0:
             raise ValidationError('A purchase claim line and positive source quantity are required.')
         if len((self.note or '').strip()) < 20:
@@ -184,6 +196,10 @@ class Replacement(models.Model):
         move = self.stock_move_id
         if move.state != 'done' or move.picking_id.state != 'done':
             raise ValidationError('Warehouse review requires a validated receipt.')
+        origin = move.origin_returned_move_id
+        if origin and (origin.state != 'done' or origin.company_id != move.company_id
+                       or origin.product_id != move.product_id or origin.location_dest_id.usage != 'supplier'):
+            raise ValidationError('The linked supplier return does not establish replacement provenance.')
         lines = move.move_line_ids
         lines.check_access('read')
         if not lines or any(ml.state != 'done' or ml.company_id != move.company_id
@@ -262,6 +278,11 @@ class Replacement(models.Model):
         if any(b != bill and b.display_type == 'product' and b.move_id.state != 'cancel'
                and b.move_id.move_type in ('in_invoice', 'in_refund') for b in bills):
             raise ValidationError('A related bill or credit requires independent financial reconciliation.')
+        disputes = self.env['supplier.shortage.claim.dispute'].search([
+            ('claim_id', '=', claim.id), ('dispute_state', 'not in', ('resolved', 'closed')),
+            ('claim_line_id', 'in', [False, line.id])], limit=1)
+        if disputes:
+            raise ValidationError('Resolve the open dispute affecting this claim line before authorizing recovery.')
         if status == 'stale':
             events = claim.audit_event_ids.filtered(lambda ev: ev.event_type == 'approval_event'
                 and ev.event_datetime >= cycle.create_date and 'invalidated current internal authorization' in ev.change_summary)
@@ -330,9 +351,11 @@ class Replacement(models.Model):
         self._lock('group_warehouse_reviewer')
         if self.state not in ('receipt', 'review') or self.create_uid == self.env.user:
             raise AccessError('An independent warehouse reviewer must check this proposal.')
-        fingerprint, *_ = self._physical_basis()
+        fingerprint, net, _, _ = self._physical_basis()
+        source_net = self.product_id.uom_id._compute_quantity(net, self.source_uom_id, round=False)
         self._transition({'state': 'finance', 'warehouse_by': self.env.uid, 'warehouse_at': fields.Datetime.now(),
-                          'source_dirty': False, 'source_fingerprint': fingerprint}, 'Warehouse evidence verified')
+                          'source_dirty': False, 'source_fingerprint': fingerprint,
+                          'source_received_qty': source_net}, 'Warehouse evidence verified')
 
     def action_verify(self):
         self._lock('group_finance_manager')
@@ -410,10 +433,29 @@ class Replacement(models.Model):
         if self.state == 'reversed':
             return
         if self.state != 'verified' or self.env.user == self.create_uid or len((self.decision_reason or '').strip()) < 20:
-            raise ValidationError('Reversal requires a verified allocation and an independent reviewerÃ¢â‚¬â„¢s documented reason.')
+            raise ValidationError('Reversal requires a verified allocation and an independent reviewerÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢s documented reason.')
         self.env.cr.execute('UPDATE supplier_shortage_claim SET write_date = write_date WHERE id = %s', [self.claim_id.id])
         self._transition({'state': 'reversed', 'active_move_id': False, 'reversed_at': fields.Datetime.now()},
                          'Recovery reversed')
+
+    def action_prepare_correction(self):
+        self.ensure_one()
+        self._role('group_claim_user')
+        self.check_access('read')
+        if self.state != 'reversed':
+            raise ValidationError('Reverse the allocation before proposing a correction.')
+        return {
+            'type': 'ir.actions.act_window',
+            'name': 'Propose Replacement Correction',
+            'res_model': MODEL,
+            'views': [(False, 'form')],
+            'context': {'default_claim_line_id': self.claim_line_id.id,
+                        'default_stock_move_id': self.stock_move_id.id,
+                        'default_stock_move_line_id': self.stock_move_line_id.id,
+                        'default_commitment_id': self.commitment_id.id if self.commitment_id.has_access('read') else False,
+                        'default_evidence_id': self.evidence_id.id,
+                        'default_supersedes_id': self.id},
+        }
 
     @api.depends('state', 'source_dirty', 'allocated_qty', 'verified_goods_value', 'claim_id.state',
                  'claim_id.approval_cycle', 'claim_id.approval_status', 'commitment_id.status',
@@ -505,7 +547,7 @@ class ReplacementAudit(models.Model):
             'reason': row.decision_reason or row.note,
             'valuation_basis': {'previous_state': old, 'state': row.state, 'line': row.claim_line_id.id,
                 'move': row.stock_move_id.id, 'move_line': row.stock_move_line_id.id, 'supplier': row.supplier_id.id,
-                'commitment': row.commitment_id.id, 'evidence': row.evidence_id.id,
+                'commitment': row.commitment_id.id, 'evidence': row.evidence_id.id, 'corrects': row.supersedes_id.id,
                 'source_quantity': row.source_qty, 'source_uom': row.source_uom_id.id,
                 'claim_uom': row.claim_uom_id.id, 'quantity': row.allocated_qty,
                 'value': row.verified_goods_value, 'currency': row.currency_id.id,
