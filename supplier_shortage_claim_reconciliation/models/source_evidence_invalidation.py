@@ -6,7 +6,6 @@ It shares the source transaction and exposes no claim IDs or totals to the calle
 """
 from odoo import api, models
 
-from .replacement_settlement import mark_replacements
 
 PHYSICAL=('receipt','challan','packing','count','photo','return','quality','warehouse_report','lot')
 FINANCIAL=('bill','bill_line','credit','account_note')
@@ -21,6 +20,7 @@ def invalidate_lines(env, line_ids, reason, kind='all'):
                         ('supplier.shortage.claim',['readiness_dirty'])]:
         env[model].flush_model(names)
     if kind not in ('receiving', 'candidate'):
+        from .replacement_settlement import mark_replacements
         mark_replacements(env, line_ids=line_ids, reason=reason)
     types=PHYSICAL if kind=='receiving' else FINANCIAL if kind=='billing' else ()
     clause='AND e.evidence_type IN %s' if types else 'AND FALSE' if kind=='candidate' else ''
@@ -115,6 +115,8 @@ class SourcePurchase(models.Model):
 
 
 def replacement_stock_changed(env, moves, before=()):
+    from .replacement_settlement import mark_replacements
+
     if not env.registry.ready:
         return
     moves.flush_recordset(['state', 'origin_returned_move_id', 'location_id', 'location_dest_id'])
@@ -175,6 +177,7 @@ class SourceMoveLine(models.Model):
         moves = self.move_id
         ids=from_moves(self.env,moves.ids)
         result=super().unlink()
+        replacement_stock_changed(self.env, moves)
         invalidate_po_lines(self.env,ids,'receiving')
         return result
 

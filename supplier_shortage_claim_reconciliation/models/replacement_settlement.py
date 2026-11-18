@@ -123,8 +123,9 @@ class Replacement(models.Model):
                 raise AccessError('Only the maker can edit a draft allocation.')
         result = super().write(values)
         for row in self:
-            row._check_proposal()
-            row._audit('Proposal details updated', row.state)
+            if values.keys() - {'decision_reason'}:
+                row._check_proposal()
+            row._audit('Settlement details updated', row.state)
         return result
 
     def unlink(self):
@@ -534,11 +535,12 @@ class ReplacementClaimLine(models.Model):
         model = self.env[MODEL]
         rows = model.search([('claim_line_id', 'in', self.ids), ('state', 'in', ('verified', 'reversed'))])
         by_line = rows.grouped('claim_line_id')
-        commitments = self.env['supplier.shortage.claim.commitment'].search([
+        commitment_model = self.env['supplier.shortage.claim.commitment']
+        commitments = commitment_model.search([
             ('claim_line_id', 'in', self.ids), ('commitment_type', '=', 'replacement'),
-            ('status', 'in', ('promised', 'pending'))]).grouped('claim_line_id')
+            ('status', 'in', ('promised', 'pending'))]).grouped('claim_line_id') if commitment_model.has_access('read') else {}
         for line in self:
-            cycles = line.claim_id.approval_cycle_ids
+            cycles = line.claim_id.approval_cycle_ids if line.claim_id.approval_cycle_ids.has_access('read') else self.env['supplier.shortage.approval.cycle']
             cycle = cycles.filtered(lambda c: c.state == 'approved' and c.number == line.claim_id.approval_cycle)[:1]
             basis = (cycle.snapshot or {}).get('basis', {}).get('financial_lines', []) if cycle else []
             row = next((row for row in basis if row['line_id'] == line.id), {})
