@@ -1,0 +1,165 @@
+﻿<odoo>
+    <record id="view_credit_search" model="ir.ui.view">
+        <field name="name">supplier.shortage.credit.search</field>
+        <field name="model">supplier.shortage.credit.allocation</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="claim_id"/><field name="credit_move_id"/><field name="supplier_id"/><field name="company_id"/>
+                <filter name="draft_source" string="Draft Source" domain="[('credit_move_id.state','=','draft')]"/>
+                <filter name="pending" string="Pending Verification" domain="[('state','in',['posting','accounts','finance'])]"/>
+                <filter name="verified" string="Verified" domain="[('state','=','verified'),('source_dirty','=',False)]"/>
+                <filter name="reversed" string="Reversed" domain="[('state','=','reversed')]"/>
+                <separator/>
+                <filter name="source_review" string="Source Exceptions" domain="[('source_dirty','=',True),('state','in',['finance','verified'])]"/>
+                <separator/>
+                <filter name="my_reviews" string="My Reviews" domain="['|',('accounts_by','=',uid),('verified_by','=',uid)]"/>
+            </search>
+        </field>
+    </record>
+    <record id="view_credit_list" model="ir.ui.view">
+        <field name="name">supplier.shortage.credit.list</field>
+        <field name="model">supplier.shortage.credit.allocation</field>
+        <field name="arch" type="xml">
+            <list decoration-warning="source_dirty and state != 'reversed'">
+                <field name="claim_id"/><field name="supplier_id"/><field name="company_id" groups="base.group_multi_company"/>
+                <field name="credit_move_id"/><field name="source_date" optional="show"/><field name="claim_line_id" optional="hide"/>
+                <field name="source_status" widget="badge"/><field name="source_amount"/><field name="available_source" optional="show"/>
+                <field name="source_currency_id" column_invisible="True"/><field name="currency_id" column_invisible="True"/>
+                <field name="effective_value"/><field name="realization" widget="badge"/>
+                <field name="verified_by" optional="hide"/><field name="source_dirty" column_invisible="True"/>
+                <field name="state" widget="badge" decoration-success="state == 'verified' and not source_dirty"/>
+            </list>
+        </field>
+    </record>
+    <record id="view_credit_form" model="ir.ui.view">
+        <field name="name">supplier.shortage.credit.form</field>
+        <field name="model">supplier.shortage.credit.allocation</field>
+        <field name="arch" type="xml">
+            <form delete="false" duplicate="false">
+                <header>
+                    <button name="action_submit" type="object" string="Submit for Review" class="oe_highlight"
+                            invisible="state not in ('draft','posting')" groups="supplier_shortage_claim_reconciliation.group_claim_user"/>
+                    <button name="action_accounts" type="object" string="Verify Credit Source" class="oe_highlight"
+                            invisible="state not in ('posting','accounts')" groups="supplier_shortage_claim_reconciliation.group_accounts_reviewer"/>
+                    <button name="action_verify" type="object" string="Authorize Credit Recovery" class="oe_highlight"
+                            invisible="state != 'finance' or source_dirty" groups="supplier_shortage_claim_reconciliation.group_finance_manager"/>
+                    <button name="action_recheck" type="object" string="Request Accounts Recheck"
+                            invisible="state != 'finance'" groups="supplier_shortage_claim_reconciliation.group_finance_manager"/>
+                    <button name="action_reject" type="object" string="Reject"
+                            invisible="state not in ('draft','posting','accounts','finance')" groups="supplier_shortage_claim_reconciliation.group_finance_manager"/>
+                    <button name="action_reverse" type="object" string="Reverse Allocation"
+                            invisible="state != 'verified'" groups="supplier_shortage_claim_reconciliation.group_finance_manager"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,posting,accounts,finance,verified"/>
+                </header>
+                <sheet>
+                    <div class="alert alert-warning" role="alert" invisible="not source_dirty or state == 'reversed'">
+                        Accounting source changed. Review the native documents and record any correction.
+                    </div>
+                    <group>
+                        <group string="Claim and Attribution">
+                            <field name="claim_id"/><field name="claim_line_id" readonly="state != 'draft'" options="{'no_create': True}"/>
+                            <field name="supplier_id"/><field name="company_id"/>
+                            <field name="purpose" readonly="state != 'draft'"/>
+                            <field name="evidence_id" readonly="state != 'draft'" options="{'no_create': True}"/>
+                            <field name="original_bill_id"/>
+                        </group>
+                        <group string="Native Vendor Credit">
+                            <field name="credit_line_id" readonly="state != 'draft'" options="{'no_create': True}"
+                                   domain="[('move_id.move_type','=','in_refund'),('company_id','=',company_id),('display_type','=','product')]"/>
+                            <field name="credit_move_id"/><field name="source_date"/><field name="source_status" widget="badge"/>
+                            <field name="available_source"/><field name="realization" widget="badge"/>
+                            <field name="source_dirty" invisible="True"/>
+                        </group>
+                    </group>
+                    <group><field name="note" readonly="state != 'draft'"/><field name="reason" readonly="state in ('reversed','rejected')"/></group>
+                    <group>
+                        <group string="Untaxed Allocation">
+                            <field name="source_currency_id"/><field name="source_amount" readonly="state != 'draft'"/>
+                            <field name="source_quantity" readonly="state != 'draft'"/>
+                            <field name="source_tax"/><field name="company_currency_id"/><field name="company_value"/>
+                        </group>
+                        <group string="Claim Recovery and Reviews">
+                            <field name="currency_id"/><field name="claim_value"/><field name="effective_value"/>
+                            <field name="conversion_date"/><field name="accounts_by"/><field name="verified_by"/><field name="verified_at"/>
+                            <field name="reversed_at" invisible="not reversed_at"/><field name="reversal_ids" widget="many2many_tags"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Settlement Audit">
+                            <field name="audit_ids"><list create="false" delete="false"><field name="event_datetime"/>
+                                <field name="actor_id"/><field name="change_summary"/><field name="reason"/></list></field>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="action_credit_allocation" model="ir.actions.act_window">
+        <field name="name">Vendor Credit Notes</field><field name="res_model">supplier.shortage.credit.allocation</field>
+        <field name="view_mode">list,form</field><field name="search_view_id" ref="view_credit_search"/>
+    </record>
+    <record id="action_credit_pending" model="ir.actions.act_window">
+        <field name="name">Pending Credit Verification</field><field name="res_model">supplier.shortage.credit.allocation</field>
+        <field name="view_mode">list,form</field><field name="search_view_id" ref="view_credit_search"/>
+        <field name="context">{'search_default_pending': 1}</field>
+    </record>
+    <record id="action_credit_exceptions" model="ir.actions.act_window">
+        <field name="name">Credit Reconciliation Exceptions</field><field name="res_model">supplier.shortage.credit.allocation</field>
+        <field name="view_mode">list,form</field><field name="search_view_id" ref="view_credit_search"/>
+        <field name="context">{'search_default_source_review': 1}</field>
+    </record>
+    <record id="view_credit_matching" model="ir.ui.view">
+        <field name="name">supplier.shortage.credit.matching.form</field>
+        <field name="model">supplier.shortage.credit.matching</field>
+        <field name="arch" type="xml">
+            <form string="Allocate Vendor Credit Note">
+                <group>
+                    <group><field name="claim_line_id" options="{'no_create': True}"/><field name="supplier_id"/>
+                        <field name="company_id"/><field name="purpose"/><field name="evidence_id" options="{'no_create': True}"/></group>
+                    <group>
+                        <field name="credit_line_id" options="{'no_create': True}"
+                               domain="[('move_id.move_type','=','in_refund'),('move_id.partner_id.commercial_partner_id','=',supplier_commercial_id),('company_id','=',company_id),('display_type','=','product')]"/>
+                        <field name="supplier_commercial_id" invisible="True"/>
+                        <field name="source_state"/><field name="source_currency_id"/><field name="source_subtotal"/>
+                        <field name="source_amount"/><field name="source_quantity"/>
+                    </group>
+                </group>
+                <group><field name="note"/></group>
+                <footer><button name="action_propose" type="object" string="Save Draft Allocation" class="btn-primary"/>
+                    <button string="Cancel" special="cancel" class="btn-secondary"/></footer>
+            </form>
+        </field>
+    </record>
+    <record id="action_credit_matching" model="ir.actions.act_window">
+        <field name="name">Allocate Vendor Credit Note</field><field name="res_model">supplier.shortage.credit.matching</field>
+        <field name="view_mode">form</field><field name="target">new</field>
+    </record>
+    <menuitem id="menu_credit_allocations" name="Vendor Credit Notes" parent="menu_settlements" action="action_credit_allocation" sequence="60"/>
+    <menuitem id="menu_credit_matching" name="Credit Matching" parent="menu_settlements" action="action_credit_matching" sequence="65"/>
+    <menuitem id="menu_credit_pending" name="Pending Credit Verification" parent="menu_settlements" action="action_credit_pending" sequence="70"/>
+    <menuitem id="menu_credit_exceptions" name="Credit Reconciliation Exceptions" parent="menu_settlements" action="action_credit_exceptions" sequence="75"/>
+    <record id="view_claim_credit_summary" model="ir.ui.view">
+        <field name="name">supplier.shortage.claim.credit.summary</field>
+        <field name="model">supplier.shortage.claim</field>
+        <field name="inherit_id" ref="view_claim_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//notebook" position="inside">
+                <page string="Financial Settlements" name="financial_settlements"
+                      groups="supplier_shortage_claim_reconciliation.group_claim_user,supplier_shortage_claim_reconciliation.group_accounts_reviewer">
+                    <button name="action_open_credits" type="object" string="Related Vendor Credits" class="btn-secondary"/>
+                    <field name="credit_summary_line_ids"><list create="false" delete="false">
+                        <field name="product_id"/><field name="currency_id" column_invisible="True"/>
+                        <field name="settlement_approved_value" string="Approved"/><field name="replacement_value" string="Goods"/>
+                        <field name="credit_value" string="Verified Credit"/><field name="reversed_credit_value" string="Reversed Credit"/>
+                        <field name="settlement_unresolved_value" string="Unresolved"/><field name="settlement_review" string="Review Required"/>
+                    </list></field>
+                    <field name="credit_allocation_ids"><list create="false" delete="false">
+                        <field name="credit_move_id"/><field name="source_status"/><field name="source_currency_id" column_invisible="True"/>
+                        <field name="currency_id" column_invisible="True"/><field name="available_source"/>
+                        <field name="effective_value"/><field name="realization"/><field name="state"/>
+                    </list></field>
+                </page>
+            </xpath>
+        </field>
+    </record>
+</odoo>

@@ -120,3 +120,8 @@ replacement_purchase,replacement proposal,supplier.shortage.replacement,group_cl
 replacement_warehouse,replacement warehouse review,supplier.shortage.replacement,group_warehouse_reviewer,ru,
 replacement_accounts,replacement financial visibility,supplier.shortage.replacement,group_accounts_reviewer,r,
 replacement_finance,replacement finance review,supplier.shortage.replacement,group_finance_manager,ru,
+credit_allocation_company,credit allocation company,supplier.shortage.credit.allocation,,crud,"[('company_id','in',company_ids)]"
+credit_allocation_purchase,credit proposal,supplier.shortage.credit.allocation,group_claim_user,cru,
+credit_allocation_accounts,credit source review,supplier.shortage.credit.allocation,group_accounts_reviewer,ru,
+credit_allocation_finance,credit finance approval,supplier.shortage.credit.allocation,group_finance_manager,ru,
+credit_matching_purchase,credit matching,supplier.shortage.credit.matching,group_claim_user,crud,

@@ -19,11 +19,11 @@ def invalidate_lines(env, line_ids, reason, kind='all'):
                         ('supplier.shortage.claim.evidence',['claim_id','scope_line_ids','is_current','is_stale']),
                         ('supplier.shortage.claim',['readiness_dirty'])]:
         env[model].flush_model(names)
-    if kind not in ('receiving', 'candidate'):
+    if kind not in ('receiving', 'candidate', 'credit'):
         from .replacement_settlement import mark_replacements
         mark_replacements(env, line_ids=line_ids, reason=reason)
     types=PHYSICAL if kind=='receiving' else FINANCIAL if kind=='billing' else ()
-    clause='AND e.evidence_type IN %s' if types else 'AND FALSE' if kind=='candidate' else ''
+    clause='AND e.evidence_type IN %s' if types else 'AND FALSE' if kind in ('candidate','credit') else ''
     params=[line_ids]
     if types: params.append(types)
     params += [line_ids,line_ids,reason,env.uid,reason]
@@ -43,7 +43,7 @@ def invalidate_lines(env, line_ids, reason, kind='all'):
         SELECT (SELECT count(*) FROM marked)+(SELECT count(*) FROM changed)''',
         [line_ids,line_ids,line_ids]+([types] if types else [])+[reason,line_ids,env.uid,reason])
     changed=env.cr.fetchone()[0]
-    if kind!='billing':
+    if kind not in ('billing','credit'):
         env.cr.execute('UPDATE supplier_shortage_warehouse_observation SET is_stale=TRUE WHERE claim_line_id IN %s AND is_current AND NOT is_stale',[line_ids])
         changed+=env.cr.rowcount
     env.cr.execute("UPDATE supplier_shortage_claim_line SET readiness_status='blocked',readiness_message=%s WHERE id IN %s",[reason,line_ids])
@@ -59,7 +59,7 @@ def invalidate_lines(env, line_ids, reason, kind='all'):
 
 def invalidate_approvals(env, line_ids, reason, *, kind=None):
     """Identity-only notification sharing the native source transaction/row locks."""
-    if env.registry.ready and kind not in ('receiving', 'candidate'):
+    if env.registry.ready and kind not in ('receiving', 'candidate', 'credit'):
         env['supplier.shortage.claim'].flush_model(['approval_cycle', 'replacement_conflict_cycle'])
         env.cr.execute('''
             UPDATE supplier_shortage_claim c SET replacement_conflict_cycle = c.approval_cycle
@@ -234,23 +234,55 @@ class SourcePicking(models.Model):
         return result
 
 
+def classify_accounting_sources(env, records, moves):
+    credit_docs = moves.filtered(lambda move: move.move_type == 'in_refund'
+                                 or move.reversed_entry_id.move_type == 'in_refund')
+    regular_docs = moves-credit_docs
+    invalidate_po_lines(env, records.filtered(lambda row: row.move_id in regular_docs).purchase_line_id.ids,'billing')
+    invalidate_po_lines(env, records.filtered(lambda row: row.move_id in credit_docs).purchase_line_id.ids
+                        + credit_docs.reversed_entry_id.invoice_line_ids.purchase_line_id.ids,'credit')
+
+
 class SourceAccountLine(models.Model):
     _inherit='account.move.line'
+
     @api.model_create_multi
     def create(self, vals_list):
         rows=super().create(vals_list)
-        invalidate_po_lines(self.env,rows.purchase_line_id.ids,'billing')
+        from .credit_settlement import notify_credit_source
+        products=rows.filtered(lambda row: row.display_type=='product')
+        notify_credit_source(self.env,products.move_id.filtered(lambda m: m.move_type=='in_refund' or m.state=='posted'))
+        classify_accounting_sources(self.env,rows,rows.move_id)
         return rows
-    def write(self,vals):
-        old=self.purchase_line_id.ids
+
+    def write(self, vals):
+        from .credit_settlement import notify_credit_source
+        material=vals.keys() & {'purchase_line_id','quantity','product_uom_id','product_id','price_unit',
+                                'discount','tax_ids','move_id','price_subtotal','price_total','balance','amount_currency'}
+        old=self.purchase_line_id.ids if material else []
+        moves=self.move_id if material else self.env['account.move']
+        products=self.filtered(lambda row:row.display_type=='product') if material else self.browse()
         result=super().write(vals)
-        if vals.keys() & {'purchase_line_id','quantity','product_uom_id','product_id','price_unit','discount','tax_ids','move_id'}:
-            invalidate_po_lines(self.env,old+self.purchase_line_id.ids,'billing')
+        if material:
+            moves |= self.move_id
+            notify_credit_source(self.env,(products | self.filtered(lambda row:row.display_type=='product')).move_id.filtered(
+                lambda m:m.move_type=='in_refund' or m.state=='posted'))
+            classify_accounting_sources(self.env,self,moves)
+            old_kind='credit' if moves and all(m.move_type=='in_refund' or m.reversed_entry_id.move_type=='in_refund' for m in moves) else 'billing'
+            invalidate_po_lines(self.env,list(set(old)-set(self.purchase_line_id.ids)),old_kind)
         return result
+
     def unlink(self):
-        ids=self.purchase_line_id.ids
+        from .credit_settlement import notify_credit_source
+        moves=self.move_id
+        credit_rows=self.filtered(lambda r:r.move_id.move_type=='in_refund' or r.move_id.reversed_entry_id.move_type=='in_refund')
+        regular_ids=(self-credit_rows).purchase_line_id.ids
+        credit_ids=credit_rows.purchase_line_id.ids
+        notify_credit_source(self.env,self.filtered(lambda row:row.display_type=='product').move_id.filtered(
+            lambda m:m.move_type=='in_refund' or m.state=='posted'))
         result=super().unlink()
-        invalidate_po_lines(self.env,ids,'billing')
+        invalidate_po_lines(self.env,regular_ids,'billing')
+        invalidate_po_lines(self.env,credit_ids,'credit')
         return result
 
 
@@ -258,11 +290,22 @@ class SourceBill(models.Model):
     _inherit='account.move'
 
     def write(self, vals):
-        before = self.reversed_entry_id.invoice_line_ids.purchase_line_id.ids if 'reversed_entry_id' in vals else []
-        result = super().write(vals)
-        if vals.keys() & {'state','partner_id','currency_id','move_type','ref','invoice_date','date','reversed_entry_id'}:
-            affected = (self | self.reversed_entry_id).invoice_line_ids.purchase_line_id
-            invalidate_po_lines(self.env, before + affected.ids, 'billing')
+        from .credit_settlement import notify_credit_source
+        material=vals.keys() & {'state','partner_id','currency_id','move_type','ref','invoice_date','date','reversed_entry_id'}
+        old=self.reversed_entry_id if material else self.browse()
+        old_posted=self.filtered(lambda m:m.state=='posted') if material else self.browse()
+        prior_credit=self.filtered(lambda m:m.move_type=='in_refund') if material else self.browse()
+        result=super().write(vals)
+        if material:
+            current=self.filtered(lambda m:m.move_type=='in_refund' or m.state=='posted')
+            notify_credit_source(self.env,current | old_posted)
+            if 'reversed_entry_id' in vals or 'move_type' in vals:
+                from .credit_settlement import version_credit
+                version_credit(self.env,prior_credit.ids)
+                notify_credit_source(self.env,old.filtered(lambda m:m.move_type=='in_refund'))
+            classify_accounting_sources(self.env,self.invoice_line_ids,self)
+            previous_regular=old.filtered(lambda m:m.move_type!='in_refund')
+            invalidate_po_lines(self.env,previous_regular.invoice_line_ids.purchase_line_id.ids,'credit')
         return result
 
 

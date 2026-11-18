@@ -27,3 +27,4 @@ from . import supplier_dispute
 from . import supplier_position
 from . import supplier_response_evidence
 from . import replacement_settlement
+from . import credit_settlement
