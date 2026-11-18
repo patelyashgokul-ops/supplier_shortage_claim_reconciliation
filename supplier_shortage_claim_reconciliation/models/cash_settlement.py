@@ -1,4 +1,4 @@
-ï»¿"""Read-only allocations of native supplier bank and payable evidence."""
+"""Read-only allocations of native supplier bank and payable evidence."""
 import hashlib
 import json
 import math

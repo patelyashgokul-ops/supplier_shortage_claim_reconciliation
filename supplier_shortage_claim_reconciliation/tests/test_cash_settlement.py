@@ -106,3 +106,41 @@ class TestCashSettlement(CreditSettlementCase):
         refund.action_reverse()
         self.assertEqual(refund.realized_snapshot,60)
         self.assertTrue(refund.audit_ids)
+
+    def test_inbound_payment_requires_its_native_bank_match(self):
+        claim,_=self._approved()
+        credit_doc=self._credit(claim,6)
+        credit=self._review(self._proposal(claim,credit_doc,60))
+        credit.action_verify()
+        company=claim.company_id
+        clearing=self.env['account.account'].create({
+            'name':'Disposable incoming payment clearing','code':'S17C','account_type':'asset_current',
+            'reconcile':True,'company_ids':[Command.set(company.ids)]})
+        statement=self._bank(claim,60,clearing)
+        method=statement.journal_id.inbound_payment_method_line_ids[:1]
+        method.payment_account_id=clearing
+        payment=self.env['account.payment'].create({
+            'company_id':company.id,'journal_id':statement.journal_id.id,'payment_method_line_id':method.id,
+            'partner_type':'supplier','payment_type':'inbound','partner_id':claim.partner_id.id,
+            'amount':60,'date':statement.date,'currency_id':statement.currency_id.id,
+        })
+        payment.action_post()
+        liquidity,payable,_=payment._seek_for_lines()
+        self.assertEqual(payment.move_id.state,'posted')
+        credit_payable=credit_doc.line_ids.filtered(lambda line:line.account_id==payable.account_id)
+        (credit_payable | payable).reconcile()
+        row=self._cash(claim,payable,60,kind='credit',bank=statement,payment_id=payment.id,credit_id=credit.id)
+        row.action_submit()
+        self.assertEqual(row.source_status,'available')
+        with self.assertRaises(ValidationError), self.env.cr.savepoint():
+            row.with_user(self.reviewer).action_accounts()
+        bank_counterpart=statement._seek_for_lines()[2]
+        (liquidity | bank_counterpart).reconcile()
+        row.with_user(self.reviewer).action_accounts()
+        row.with_user(self.finance).action_verify()
+        self.assertEqual(row.source_status,'bank')
+        self.assertEqual(row.realized_value,60)
+        self.assertEqual(row.effective_value,0)
+        bank_counterpart.remove_move_reconcile()
+        self.assertEqual(row.realized_value,0)
+        self.assertEqual(claim.verified_recovery_amount,60)
