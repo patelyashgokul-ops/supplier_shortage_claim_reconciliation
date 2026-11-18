@@ -301,7 +301,8 @@ class TestReplacementSettlement(SupplierSubmissionCase):
                 'source_qty': 1, 'substitute_claim_qty': 1, 'evidence_id': evidence.id,
                 'note': 'Supplier independently confirmed this verified serial against the submitted shortage.',
             })
-            self._review(row)
+            row.action_request_verification()
+            row.with_user(self.warehouse).action_warehouse_verify()
             return row.with_user(self.finance)
 
         first = receipt_and_proposal()
